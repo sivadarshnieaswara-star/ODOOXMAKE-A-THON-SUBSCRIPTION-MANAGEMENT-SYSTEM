@@ -59,11 +59,42 @@ function qs(obj) {
 
 function toast(msg, kind = 'ok') {
   const el = document.createElement('div');
-  el.style.background = kind === 'error' ? '#b91c1c' : kind === 'info' ? '#374151' : '#017E84';
-  el.textContent = msg;
+  if (kind === 'error') el.className = 'error';
+  const color = kind === 'error' ? '#e11d48' : kind === 'info' ? 'var(--slate-500)' : 'var(--brand-600)';
+  el.innerHTML = `<span class="dot" style="background:${color}"></span><span>${esc(msg)}</span>`;
   $('#toast').appendChild(el);
-  setTimeout(() => el.remove(), kind === 'error' ? 6000 : 3500);
+  while ($('#toast').children.length > 3) $('#toast').firstChild.remove();
+  setTimeout(() => el.remove(), kind === 'error' ? 6000 : 4500);
 }
+
+// ---------- icons & glow ----------
+const icon = (name, cls = '') => `<i data-lucide="${name}" class="${cls}"></i>`;
+// Swap <i data-lucide> placeholders for SVGs whenever new markup lands in the page.
+new MutationObserver(() => {
+  if (window.lucide && document.querySelector('i[data-lucide]')) lucide.createIcons({ attrs: { 'stroke-width': 2 } });
+}).observe(document.body, { childList: true, subtree: true });
+
+// Glow cards: the border lights up on the side nearest the pointer (eased toward the target angle).
+const glow = { x: 0, y: 0, raf: 0 };
+function updateGlow() {
+  glow.raf = 0;
+  let moving = false;
+  for (const el of document.querySelectorAll('.glow-card .glow')) {
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2, pad = 64;
+    const near = glow.x > r.left - pad && glow.x < r.right + pad && glow.y > r.top - pad && glow.y < r.bottom + pad;
+    const inCenter = Math.hypot(glow.x - cx, glow.y - cy) < 0.5 * Math.min(r.width, r.height) * 0.01;
+    el.style.setProperty('--active', near && !inCenter ? '1' : '0');
+    if (!near) continue;
+    const target = (180 * Math.atan2(glow.y - cy, glow.x - cx)) / Math.PI + 90;
+    const cur = parseFloat(el.style.getPropertyValue('--start')) || 0;
+    const diff = ((target - cur + 540) % 360) - 180;
+    if (Math.abs(diff) > 0.5) { el.style.setProperty('--start', String(cur + diff * 0.18)); moving = true; }
+  }
+  if (moving) glow.raf = requestAnimationFrame(updateGlow);
+}
+document.addEventListener('pointermove', e => { glow.x = e.clientX; glow.y = e.clientY; if (!glow.raf) glow.raf = requestAnimationFrame(updateGlow); }, { passive: true });
+
 async function run(fn, okMsg) {
   try { const r = await fn(); if (okMsg) toast(okMsg); return r; }
   catch (e) { toast(e.message, 'error'); throw e; }
@@ -304,12 +335,15 @@ function renderAuth(mode = 'login') {
 }
 
 // ---------- shell & routing ----------
+// [route, label, icon, flow step]
 const STAFF_NAV = [
-  ['dashboard', 'Dashboard'], ['subscriptions', 'Subscriptions'], ['templates', 'Quotation templates'], ['invoices', 'Invoices'],
-  ['payments', 'Payments'], ['customers', 'Customers'], ['products', 'Products'], ['plans', 'Plans'], ['taxes', 'Taxes'],
-  ['discounts', 'Discounts'],
+  ['Overview'], ['dashboard', 'Dashboard', 'layout-dashboard'],
+  ['Revenue flow'], ['templates', 'Quotation templates', 'file-text', '01'], ['subscriptions', 'Subscriptions', 'repeat', '02'],
+  ['invoices', 'Invoices', 'receipt', '03'], ['payments', 'Payments', 'wallet', '04'],
+  ['Records'], ['customers', 'Customers', 'users'], ['products', 'Products', 'package'], ['plans', 'Plans', 'calendar-clock'],
+  ['taxes', 'Taxes', 'percent'], ['discounts', 'Discounts', 'badge-percent'],
 ];
-const ADMIN_NAV = [['staff', 'Staff'], ['outbox', 'Email outbox']];
+const ADMIN_NAV = [['Admin'], ['staff', 'Staff', 'user-cog'], ['outbox', 'Email outbox', 'mail']];
 const CUSTOMER_NAV = [['my-subscriptions', 'My subscriptions'], ['my-invoices', 'Invoices'], ['my-payments', 'Payments'],
   ['subscribe', 'Subscribe'], ['profile', 'Profile']];
 
@@ -318,23 +352,65 @@ function route() {
   return { name: name || (isStaff() ? 'dashboard' : 'my-subscriptions'), id };
 }
 
+function logo(light = true) {
+  return `<a href="#/" class="shrink-0 text-xl font-bold tracking-tight ${light ? 'text-white' : 'text-brand-700'}">brightloop<span class="opacity-60">.</span></a>`;
+}
+
 function renderShell() {
-  const nav = isStaff() ? [...STAFF_NAV, ...(isAdmin() ? ADMIN_NAV : [])] : CUSTOMER_NAV;
   const r = route();
-  $('#app').innerHTML = `
-    <header class="bg-odoo text-white sticky top-0 z-40 shadow">
-      <div class="max-w-[1400px] mx-auto px-4 flex items-center gap-4 h-14">
-        <a href="#/" class="font-bold text-lg tracking-tight shrink-0">brightloop<span class="opacity-60">.</span>
-          <span class="font-normal text-white/70 text-sm ml-1 hidden sm:inline">${isStaff() ? 'Subscriptions' : 'Customer portal'}</span></a>
-        <nav class="flex gap-1 overflow-x-auto flex-1">${nav.map(([k, t]) =>
-          `<a href="#/${k}" class="nav-link ${r.name === k ? 'active' : ''}">${t}</a>`).join('')}</nav>
-        <div class="flex items-center gap-3 shrink-0">
-          <div class="text-right leading-tight hidden md:block"><div class="text-sm font-medium">${esc(S.user.name)}</div>
-            <div class="text-xs text-white/70">${esc(S.user.email)}</div></div>
-          <span class="badge bg-white/20 text-white">${S.user.role}</span>
-          <button class="btn btn-sm bg-white/10 text-white hover:bg-white/20" id="logout">Sign out</button></div></div></header>
-    <main id="main" class="max-w-[1400px] mx-auto p-4 md:p-6"></main>`;
-  $('#logout').addEventListener('click', logout);
+  if (!isStaff()) {
+    $('#app').innerHTML = `
+      <header class="bg-odoo text-white sticky top-0 z-40 shadow">
+        <div class="max-w-[1400px] mx-auto px-4 flex items-center gap-4 h-14">
+          <a href="#/" class="font-bold text-lg tracking-tight shrink-0">brightloop<span class="opacity-60">.</span>
+            <span class="font-normal text-white/70 text-sm ml-1 hidden sm:inline">Customer portal</span></a>
+          <nav class="flex gap-1 overflow-x-auto flex-1">${CUSTOMER_NAV.map(([k, t]) =>
+            `<a href="#/${k}" class="nav-link ${r.name === k ? 'active' : ''}">${t}</a>`).join('')}</nav>
+          <div class="flex items-center gap-3 shrink-0">
+            <div class="text-right leading-tight hidden md:block"><div class="text-sm font-medium">${esc(S.user.name)}</div>
+              <div class="text-xs text-white/70">${esc(S.user.email)}</div></div>
+            <span class="badge bg-white/20 text-white">${S.user.role}</span>
+            <button class="btn btn-sm bg-white/10 text-white hover:bg-white/20" data-logout>Sign out</button></div></div></header>
+      <main id="main" class="max-w-[1400px] mx-auto p-4 md:p-6"></main>`;
+    $$('[data-logout]').forEach(b => b.addEventListener('click', logout));
+    return;
+  }
+  const nav = [...STAFF_NAV, ...(isAdmin() ? ADMIN_NAV : [])];
+  const initials = S.user.name.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase();
+  const sidebar = `<nav class="flex h-full flex-col p-4 overflow-y-auto">
+      <div class="mb-4 px-2 pt-1">${logo()}</div>
+      ${nav.map(([k, t, ic, step]) => !t ? `<div class="side-group">${k}</div>` :
+        `<a href="#/${k}" class="side-link ${r.name === k ? 'active' : ''}">${icon(ic)}<span class="flex-1">${t}</span>
+          ${k === 'invoices' ? '<span id="nav-overdue"></span>' : ''}${step ? `<span class="step">${step}</span>` : ''}</a>`).join('')}
+      <div class="mt-auto pt-4"><div class="rounded-xl bg-white/10 p-3 text-xs text-brand-100">
+        <div class="flex items-center gap-2.5">
+          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/15 ring-2 ring-white/20 text-sm font-bold text-white">${esc(initials)}</span>
+          <span class="min-w-0"><span class="block truncate font-semibold text-white">${esc(S.user.name)}</span>
+            <span class="block truncate">${esc(S.user.email)}</span></span></div>
+        <div class="mt-2 flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" id="live-dot" style="background:#a3a6ac"></span>
+          <span id="live-text">Connecting…</span></div>
+        <div class="mt-3 flex items-center justify-between">
+          <button data-logout class="flex items-center gap-1.5 font-semibold text-white/90 hover:text-white">${icon('log-out', 'h-3.5 w-3.5')} Sign out</button>
+          <span class="badge ${S.user.role === 'admin' ? 'bg-white/20 text-white' : 'b-staff'}">${S.user.role}</span></div></div></div></nav>`;
+  $('#app').innerHTML = `<div class="min-h-screen lg:pl-64">
+    <aside class="fixed inset-y-0 left-0 z-30 hidden w-64 lg:block" style="background:linear-gradient(to bottom, var(--brand-900), var(--night))">${sidebar}</aside>
+    <div id="drawer" class="fixed inset-0 z-40 hidden lg:hidden"><div class="absolute inset-0 bg-black/40" data-close-drawer></div>
+      <aside class="absolute inset-y-0 left-0 w-64" style="background:linear-gradient(to bottom, var(--brand-900), var(--night))">
+        <button class="absolute right-3 top-4 text-white" data-close-drawer aria-label="Close menu">${icon('x')}</button>${sidebar}</aside></div>
+    <header class="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur lg:hidden">
+      <button id="open-drawer" aria-label="Open menu">${icon('menu')}</button>${logo(false)}</header>
+    <main id="main" class="mx-auto max-w-7xl px-4 py-8 sm:px-8"></main></div>`;
+  $$('[data-logout]').forEach(b => b.addEventListener('click', logout));
+  $('#open-drawer').addEventListener('click', () => $('#drawer').classList.remove('hidden'));
+  $$('[data-close-drawer], #drawer .side-link').forEach(b => b.addEventListener('click', () => $('#drawer').classList.add('hidden')));
+  // Status pill + overdue counter in the nav.
+  fetch('/api/health').then(r => r.ok).catch(() => false).then(ok => {
+    $$('#live-dot').forEach(d => { d.style.background = ok ? '#34d399' : '#a3a6ac'; });
+    $$('#live-text').forEach(t => { t.textContent = ok ? 'Billing engine online' : 'Server unreachable'; });
+  });
+  api('/invoices?overdue=true&limit=1').then(d => {
+    if (d.total) $$('#nav-overdue').forEach(n => { n.innerHTML = `<span class="rounded-full bg-rose-500 px-1.5 text-[11px] font-bold text-white">${d.total}</span>`; });
+  }).catch(() => {});
 }
 
 const VIEWS = {
@@ -361,13 +437,25 @@ async function render() {
 window.addEventListener('hashchange', render);
 const refresh = () => render();
 
-function pageHeader(title, sub, actions = '') {
-  return `<div class="flex flex-wrap items-end justify-between gap-3 mb-5"><div><h1 class="text-2xl font-semibold">${title}</h1>
-    ${sub ? `<p class="text-sm text-gray-500 mt-0.5">${sub}</p>` : ''}</div><div class="flex flex-wrap gap-2">${actions}</div></div>`;
+function pageHeader(title, sub, actions = '', eyebrow = '') {
+  return `<div class="mb-6 flex flex-wrap items-end justify-between gap-4"><div>
+    ${eyebrow ? `<div class="mb-1 text-xs font-bold uppercase tracking-widest text-brand-700">${eyebrow}</div>` : ''}
+    <h1 class="text-2xl font-bold tracking-tight text-ink">${title}</h1>
+    ${sub ? `<p class="mt-1 max-w-2xl text-sm text-slate-600">${sub}</p>` : ''}</div>
+    <div class="flex flex-wrap gap-2">${actions}</div></div>`;
 }
 function emptyRow(cols, text = 'Nothing here yet.') {
-  return `<tr><td colspan="${cols}" class="text-center text-gray-400 py-10">${text}</td></tr>`;
+  return `<tr><td colspan="${cols}" class="text-center text-slate-400 py-10">${text}</td></tr>`;
 }
+function stat(ic, label, value, sub, tone = 'brand') {
+  return `<div class="glow-card"><div class="glow"></div><div class="inner">
+    <div class="stat-icon tone-${tone}">${icon(ic)}</div>
+    <div class="text-2xl font-bold tracking-tight text-ink tabular-nums">${value}</div>
+    <div class="mt-0.5 text-sm font-medium text-slate-700">${label}</div>
+    <div class="text-xs text-slate-500">${sub}</div></div></div>`;
+}
+const AGING_TONE = { '1-30': 'b-amber', '31-60': 'b-red', '60+': 'b-overdue' };
+
 function pager(total, offset, onPage) {
   const id = 'pg' + Math.random().toString(36).slice(2, 7);
   setTimeout(() => {
@@ -383,19 +471,37 @@ function pager(total, offset, onPage) {
 
 // ---------- dashboard ----------
 function trendChart(trend) {
-  const W = 720, H = 220, P = 36, max = Math.max(1, ...trend.flatMap(t => [t.invoiced, t.collected]));
+  const W = 720, H = 230, P = 40, max = Math.max(1, ...trend.flatMap(t => [t.invoiced, t.collected]));
   const bw = (W - P * 2) / trend.length;
-  const y = v => H - 24 - (v / max) * (H - 48);
+  const y = v => H - 26 - (v / max) * (H - 50);
   const bars = trend.map((t, i) => {
     const x = P + i * bw;
     const m = new Date(t.month + '-01T00:00:00').toLocaleDateString('en-GB', { month: 'short' });
-    return `<rect x="${x + bw * .14}" y="${y(t.invoiced)}" width="${bw * .34}" height="${H - 24 - y(t.invoiced)}" fill="#c9b3c3" rx="2"><title>${m}: invoiced ${money(t.invoiced)}</title></rect>
-      <rect x="${x + bw * .52}" y="${y(t.collected)}" width="${bw * .34}" height="${H - 24 - y(t.collected)}" fill="#017E84" rx="2"><title>${m}: collected ${money(t.collected)}</title></rect>
-      <text x="${x + bw / 2}" y="${H - 6}" font-size="11" text-anchor="middle" fill="#6b7280">${m}</text>`;
+    return `<rect x="${x + bw * .16}" y="${y(t.invoiced)}" width="${bw * .32}" height="${H - 26 - y(t.invoiced)}" fill="var(--series-invoiced)" rx="3"><title>${m}: invoiced ${money(t.invoiced)}</title></rect>
+      <rect x="${x + bw * .52}" y="${y(t.collected)}" width="${bw * .32}" height="${H - 26 - y(t.collected)}" fill="var(--series-collected)" rx="3"><title>${m}: collected ${money(t.collected)}</title></rect>
+      <text x="${x + bw / 2}" y="${H - 6}" font-size="11" text-anchor="middle" fill="var(--slate-500)">${m}</text>`;
   }).join('');
-  const grid = [0, .5, 1].map(f => `<line x1="${P}" x2="${W - P}" y1="${y(max * f)}" y2="${y(max * f)}" stroke="#eee"/>
-    <text x="${P - 6}" y="${y(max * f) + 4}" font-size="10" text-anchor="end" fill="#9ca3af">${max * f >= 1000 ? Math.round(max * f / 1000) + 'k' : Math.round(max * f)}</text>`).join('');
+  const grid = [0, .25, .5, .75, 1].map(f => `<line x1="${P}" x2="${W - P}" y1="${y(max * f)}" y2="${y(max * f)}" stroke="var(--slate-200)"/>
+    <text x="${P - 8}" y="${y(max * f) + 4}" font-size="10" text-anchor="end" fill="var(--slate-400)">${max * f >= 1000 ? (max * f / 1000).toFixed(max >= 10000 ? 0 : 1) + 'k' : Math.round(max * f)}</text>`).join('');
   return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto">${grid}${bars}</svg>`;
+}
+
+function runBillingDialog() {
+  formModal('Run billing', [
+    { name: 'as_of', label: 'Bill everything due on or before', type: 'date', required: true, value: today() },
+    { name: 'auto_confirm', label: 'Confirm invoices straight away', type: 'checkbox', value: false },
+  ], async v => {
+    const r = await api('/billing/run', { method: 'POST', body: v });
+    openModal('Billing run complete', `<div class="grid grid-cols-2 gap-3 text-sm">
+      <div class="card kpi"><div class="k">Subscriptions due</div><div class="v">${r.subscriptions_scanned}</div></div>
+      <div class="card kpi"><div class="k">Invoices created</div><div class="v text-teal">${r.invoices_created}</div></div>
+      <div class="card kpi"><div class="k">Already invoiced (skipped)</div><div class="v">${r.skipped_existing}</div></div>
+      <div class="card kpi"><div class="k">Auto-closed at expiry</div><div class="v">${r.subscriptions_closed}</div></div></div>
+      ${r.invoice_numbers.length ? `<p class="text-sm text-slate-600 mt-4">New: ${r.invoice_numbers.slice(0, 30).join(', ')}${r.invoice_numbers.length > 30 ? '…' : ''}</p>`
+        : '<p class="text-sm text-slate-500 mt-4">Nothing was due. Running it again is always safe.</p>'}`,
+      { footer: '<button class="btn btn-primary" data-close>Done</button>' });
+    refresh();
+  }, { submitLabel: 'Run billing' });
 }
 
 async function viewDashboard(main) {
@@ -403,49 +509,102 @@ async function viewDashboard(main) {
   const [s, overdue, plans, customers] = await Promise.all([
     api('/analytics/summary?' + qs(S.dash)), api('/analytics/overdue'), getPlans(), getCustomers()]);
   const ms = Math.round(performance.now() - t0);
-  const kpi = (k, v, sub, color = '') => `<div class="card kpi"><div class="k">${k}</div><div class="v ${color}">${v}</div>
-    <div class="text-xs text-gray-500 mt-1">${sub}</div></div>`;
-  const statuses = ['draft', 'quotation', 'confirmed', 'active', 'paused', 'closed'];
+  const statuses = ['active', 'paused', 'quotation', 'confirmed', 'draft', 'closed'];
   const totalSubs = statuses.reduce((a, k) => a + (s.subscriptions_by_status[k] || 0), 0) || 1;
-  main.innerHTML = pageHeader('Finance overview', `Loaded in ${ms} ms · figures update live as invoices and payments are recorded`) + `
-    <form id="df" class="card p-3 mb-5 flex flex-wrap items-end gap-3">
-      <div><label class="label">From</label><input type="date" class="input" name="date_from" value="${S.dash.date_from}"></div>
-      <div><label class="label">To</label><input type="date" class="input" name="date_to" value="${S.dash.date_to}"></div>
-      <div class="min-w-[180px]"><label class="label">Plan</label><select class="input" name="plan_id"><option value="">All plans</option>
-        ${plans.map(p => `<option value="${p.id}" ${String(p.id) === S.dash.plan_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
-      <div class="min-w-[200px]"><label class="label">Customer</label><select class="input" name="customer_id"><option value="">All customers</option>
-        ${customers.map(c => `<option value="${c.id}" ${String(c.id) === S.dash.customer_id ? 'selected' : ''}>${esc(c.company_name || c.name)}</option>`).join('')}</select></div>
-      <button class="btn btn-primary">Apply</button><button type="button" class="btn btn-light" id="dreset">Reset</button>
-      <span class="text-xs text-gray-500 ml-auto">Date range applies to invoiced and collected amounts.</span></form>
-    <div class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-5">
-      ${kpi('Active subscriptions', s.active_subscriptions.toLocaleString(), `${(s.subscriptions_by_status.paused || 0)} paused`)}
-      ${kpi('MRR', money(s.mrr), 'Monthly recurring revenue', 'text-odoo')}
-      ${kpi('ARR', money(s.arr), 'MRR × 12')}
-      ${kpi('Collected', money(s.revenue_collected), `${s.payments_count} payments`, 'text-teal')}
-      ${kpi('Outstanding', money(s.outstanding_amount), `${s.outstanding_count} open invoices`)}
-      ${kpi('Overdue', money(s.overdue_amount), `${s.overdue_count} invoices past due`, s.overdue_count ? 'text-red-700' : '')}
+  const planMax = Math.max(1, ...s.active_by_plan.map(p => p.count));
+  const methodTotal = Object.values(s.collected_by_method).reduce((a, b) => a + b, 0) || 1;
+  const collectRate = s.invoiced_amount ? Math.min(1, s.revenue_collected / s.invoiced_amount) : 0;
+  const filtersOn = Object.values(S.dash).some(Boolean);
+  const label2 = (t, v) => `<div class="flex justify-between gap-3 text-sm"><span class="text-slate-500">${t}</span><span class="text-right font-medium text-slate-800">${v}</span></div>`;
+
+  main.innerHTML = pageHeader('Finance overview',
+    'Active subscriptions, recurring revenue, collections and overdue invoices in one place. Figures are live from the billing ledger.',
+    `<button class="btn btn-light" id="go-invoices">${icon('receipt')} Invoices</button><button class="btn btn-primary" id="run-billing">${icon('play')} Run billing</button>`,
+    `Overview · Loaded in ${ms} ms`) + `
+
+    <div class="card mb-6 overflow-hidden">
+      <div class="card-head"><div class="t">${icon('sliders-horizontal')} Filters</div>
+        <div class="s">Date range applies to invoiced and collected amounts</div>
+        ${filtersOn ? '<span class="badge b-teal ml-auto">Filtered</span>' : ''}</div>
+      <form id="df" class="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1.3fr_1.3fr_auto] items-end">
+        <label class="block"><span class="label">From</span><input type="date" class="input" name="date_from" value="${S.dash.date_from}"></label>
+        <label class="block"><span class="label">To</span><input type="date" class="input" name="date_to" value="${S.dash.date_to}"></label>
+        <label class="block"><span class="label">Plan</span><select class="input" name="plan_id"><option value="">All plans</option>
+          ${plans.map(p => `<option value="${p.id}" ${String(p.id) === S.dash.plan_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+        <label class="block"><span class="label">Customer</span><select class="input" name="customer_id"><option value="">All customers</option>
+          ${customers.map(c => `<option value="${c.id}" ${String(c.id) === S.dash.customer_id ? 'selected' : ''}>${esc(c.company_name || c.name)}</option>`).join('')}</select></label>
+        <div class="flex gap-2"><button class="btn btn-primary">Apply</button><button type="button" class="btn btn-ghost" id="dreset">Reset</button></div>
+      </form></div>
+
+    <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      ${stat('repeat', 'Active subscriptions', s.active_subscriptions.toLocaleString(), `${s.subscriptions_by_status.paused || 0} paused · ${s.subscriptions_by_status.quotation || 0} quotes out`)}
+      ${stat('trending-up', 'Monthly recurring revenue', money(s.mrr), 'Normalised across billing frequencies', 'green')}
+      ${stat('calendar-range', 'Annual recurring revenue', money(s.arr), 'MRR × 12', 'blue')}
+      ${stat('wallet', 'Revenue collected', money(s.revenue_collected), `${s.payments_count} payments · ${Math.round(collectRate * 100)}% of invoiced`, 'green')}
+      ${stat('hourglass', 'Outstanding', money(s.outstanding_amount), `${s.outstanding_count} confirmed invoices unpaid`, 'amber')}
+      ${stat('alert-triangle', 'Overdue', money(s.overdue_amount), `${s.overdue_count} invoices past their due date`, s.overdue_count ? 'red' : 'green')}
     </div>
-    <div class="grid lg:grid-cols-3 gap-4 mb-5">
-      <div class="card p-4 lg:col-span-2"><div class="flex justify-between items-center mb-2"><h3 class="font-semibold">Invoiced vs collected, last 12 months</h3>
-        <div class="flex gap-3 text-xs text-gray-500"><span><i class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#c9b3c3"></i> Invoiced</span>
-        <span><i class="inline-block w-3 h-3 rounded-sm align-middle" style="background:#017E84"></i> Collected</span></div></div>${trendChart(s.trend)}</div>
-      <div class="card p-4 space-y-5">
-        <div><h3 class="font-semibold mb-3">Subscriptions by status</h3>
-          <div class="flex h-3 rounded overflow-hidden mb-3">${statuses.map(k => `<div class="b-${k}" style="width:${(s.subscriptions_by_status[k] || 0) / totalSubs * 100}%"></div>`).join('')}</div>
-          <div class="grid grid-cols-2 gap-y-1 text-sm">${statuses.map(k => `<div>${badge(k)} <span class="ml-1 font-medium">${s.subscriptions_by_status[k] || 0}</span></div>`).join('')}</div></div>
-        <div><h3 class="font-semibold mb-2">Active by plan</h3>${s.active_by_plan.map(p => `<div class="flex justify-between text-sm py-0.5"><span>${esc(p.plan)}</span><b>${p.count}</b></div>`).join('') || '<p class="text-sm text-gray-400">None</p>'}</div>
-        <div><h3 class="font-semibold mb-2">Collected by method</h3>${Object.entries(s.collected_by_method).map(([m, a]) => `<div class="flex justify-between text-sm py-0.5"><span>${methodName(m)}</span><b>${money(a)}</b></div>`).join('') || '<p class="text-sm text-gray-400">None</p>'}</div>
-      </div></div>
-    <div class="card"><div class="px-4 py-3 border-b flex items-center justify-between"><h3 class="font-semibold">Overdue chase list</h3>
-      <a href="#/invoices" class="text-sm text-odoo" id="see-overdue">Open in invoices →</a></div>
-      <div class="overflow-x-auto"><table class="tbl"><thead><tr><th>Invoice</th><th>Customer</th><th>Contact</th><th>Due</th><th>Aging</th><th class="num">Balance</th></tr></thead>
-      <tbody>${overdue.map(o => `<tr class="clickable" data-inv="${o.invoice_id}"><td class="font-medium">${o.invoice_number}</td>
-        <td>${esc(o.company_name || o.customer_name)}</td><td class="text-xs">${esc(o.email)}<br>${esc(o.phone || '')}</td><td>${fmtDate(o.due_date)}</td>
-        <td><span class="badge b-overdue">${o.days_overdue} days · ${o.bucket}</span></td><td class="num font-semibold">${money(o.balance_due)}</td></tr>`).join('') || emptyRow(6, 'No overdue invoices. 🎉')}</tbody></table></div></div>`;
+
+    <div class="mb-6 grid gap-6 lg:grid-cols-3">
+      <div class="card overflow-hidden lg:col-span-2">
+        <div class="card-head"><div class="t">${icon('bar-chart-3')} Invoiced vs collected</div><div class="s">Last 12 months</div>
+          <div class="ml-auto flex gap-3 text-xs text-slate-500">
+            <span class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm" style="background:var(--series-invoiced)"></span>Invoiced</span>
+            <span class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm" style="background:var(--series-collected)"></span>Collected</span></div></div>
+        <div class="p-4 sm:p-6">${trendChart(s.trend)}</div>
+        <div class="grid grid-cols-3 border-t border-slate-100 text-center">
+          <div class="p-4"><div class="text-xs text-slate-500">Invoiced</div><div class="font-semibold tabular-nums">${money(s.invoiced_amount)}</div></div>
+          <div class="p-4 border-x border-slate-100"><div class="text-xs text-slate-500">Collected</div><div class="font-semibold tabular-nums">${money(s.revenue_collected)}</div></div>
+          <div class="p-4"><div class="text-xs text-slate-500">Collection rate</div><div class="font-semibold tabular-nums">${Math.round(collectRate * 100)}%</div></div></div>
+      </div>
+      <div class="card overflow-hidden">
+        <div class="card-head"><div class="t">${icon('pie-chart')} Subscriptions</div><div class="s">${totalSubs} total</div></div>
+        <div class="space-y-5 p-6">
+          <div class="space-y-2.5">${statuses.map(k => `<div class="flex items-center gap-3 text-sm">
+            <span class="w-24">${badge(k)}</span><div class="progress flex-1"><div style="width:${(s.subscriptions_by_status[k] || 0) / totalSubs * 100}%"></div></div>
+            <span class="w-6 text-right font-semibold tabular-nums">${s.subscriptions_by_status[k] || 0}</span></div>`).join('')}</div>
+          <div class="border-t border-slate-100 pt-4"><div class="mb-2 text-sm font-medium text-slate-700">Active by plan</div>
+            <div class="space-y-2">${s.active_by_plan.map(p => `<div><div class="flex justify-between text-sm"><span class="text-slate-600">${esc(p.plan)}</span><b>${p.count}</b></div>
+              <div class="progress mt-1"><div style="width:${p.count / planMax * 100}%"></div></div></div>`).join('') || '<p class="text-sm text-slate-400">No active subscriptions</p>'}</div></div>
+          <div class="border-t border-slate-100 pt-4 space-y-2"><div class="text-sm font-medium text-slate-700">Collected by method</div>
+            ${Object.entries(s.collected_by_method).sort((a, b) => b[1] - a[1]).map(([m, a]) => label2(`${methodName(m)} <span class="text-xs text-slate-400">${Math.round(a / methodTotal * 100)}%</span>`, money(a))).join('') || '<p class="text-sm text-slate-400">No payments yet</p>'}</div>
+        </div></div>
+    </div>
+
+    <div class="card overflow-hidden">
+      <div class="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4">
+        <h2 class="font-semibold text-ink">${overdue.length} overdue invoice${overdue.length === 1 ? '' : 's'}</h2>
+        ${overdue.length ? `<span class="text-sm text-slate-500">${money(overdue.reduce((a, o) => a + o.balance_due, 0))} to chase</span>` : ''}
+        <div class="search ml-auto">${icon('search')}<input class="input w-56" id="od-q" placeholder="Search…"></div>
+        <select class="input w-36" id="od-b"><option value="">All ages</option><option>1-30</option><option>31-60</option><option>60+</option></select>
+      </div>
+      <div class="overflow-x-auto"><table class="tbl"><thead><tr><th>Invoice</th><th>Balance</th><th>Aging</th><th>Due</th><th>Contact</th><th></th></tr></thead>
+      <tbody id="od-body"></tbody></table></div></div>`;
+
+  const odRows = list => list.map(o => `<tr class="clickable" data-inv="${o.invoice_id}">
+      <td><div class="font-medium text-ink">${esc(o.company_name || o.customer_name)}</div><div class="mt-0.5 text-xs text-slate-500">${o.invoice_number}</div></td>
+      <td class="font-semibold text-ink tabular-nums">${money(o.balance_due)}</td>
+      <td><span class="badge normal-case ${AGING_TONE[o.bucket]}">${o.days_overdue} day${o.days_overdue === 1 ? '' : 's'} · ${o.bucket}</span></td>
+      <td class="text-slate-600">${fmtDate(o.due_date)}</td>
+      <td><div class="text-slate-700">${esc(o.email)}</div><div class="text-xs text-slate-400">${esc(o.phone || '')}</div></td>
+      <td class="text-right"><button class="btn btn-ghost btn-sm" data-pay="${o.invoice_id}">${icon('hand-coins')} Record payment</button></td></tr>`).join('')
+    || emptyRow(6, overdue.length ? 'No overdue invoices match.' : 'No overdue invoices. Everyone is paid up.');
+  const drawOverdue = () => {
+    const q = $('#od-q').value.toLowerCase(), b = $('#od-b').value;
+    $('#od-body').innerHTML = odRows(overdue.filter(o => (!b || o.bucket === b) &&
+      `${o.invoice_number} ${o.customer_name} ${o.company_name} ${o.email}`.toLowerCase().includes(q)));
+    $$('#od-body [data-inv]').forEach(tr => tr.addEventListener('click', () => showInvoice(tr.dataset.inv)));
+    $$('#od-body [data-pay]').forEach(btn => btn.addEventListener('click', async e => {
+      e.stopPropagation(); paymentForm(await api('/invoices/' + btn.dataset.pay));
+    }));
+  };
+  drawOverdue();
+  $('#od-q').addEventListener('input', drawOverdue);
+  $('#od-b').addEventListener('change', drawOverdue);
   $('#df').addEventListener('submit', e => { e.preventDefault(); Object.assign(S.dash, Object.fromEntries(new FormData(e.target))); refresh(); });
   $('#dreset').addEventListener('click', () => { S.dash = { date_from: '', date_to: '', plan_id: '', customer_id: '' }; refresh(); });
-  $('#see-overdue').addEventListener('click', () => { S.invFilter = { status: 'overdue', q: '', offset: 0 }; });
-  $$('[data-inv]', main).forEach(tr => tr.addEventListener('click', () => showInvoice(tr.dataset.inv)));
+  $('#run-billing').addEventListener('click', runBillingDialog);
+  $('#go-invoices').addEventListener('click', () => { location.hash = '#/invoices'; });
 }
 
 // ---------- subscriptions ----------
@@ -634,7 +793,7 @@ async function viewInvoices(main) {
   const data = await api('/invoices?' + qs(params));
   const tabs = [['', 'All'], ['draft', 'Draft'], ['outstanding', 'Outstanding'], ['overdue', 'Overdue'], ['paid', 'Paid'], ['cancelled', 'Cancelled']];
   main.innerHTML = pageHeader('Invoices', 'Created from subscriptions on billing day; nothing billed twice, nothing skipped.',
-    '<button class="btn btn-teal" id="run-billing">▶ Run billing</button>') + `
+    `<button class="btn btn-primary" id="run-billing">${icon('play')} Run billing</button>`) + `
     <div class="card"><div class="flex flex-wrap items-center gap-2 px-3 pt-2 border-b">
       ${tabs.map(([k, t]) => `<a class="tab ${f.status === k ? 'active' : ''}" data-st="${k}">${t}</a>`).join('')}
       <form id="if" class="ml-auto pb-2"><input class="input !w-60" name="q" placeholder="Search number or customer…" value="${esc(f.q)}"></form></div>
@@ -648,21 +807,7 @@ async function viewInvoices(main) {
   $$('[data-st]').forEach(a => a.addEventListener('click', () => { f.status = a.dataset.st; f.offset = 0; refresh(); }));
   $('#if').addEventListener('submit', e => { e.preventDefault(); f.q = e.target.q.value; f.offset = 0; refresh(); });
   $$('[data-inv]', main).forEach(tr => tr.addEventListener('click', () => showInvoice(tr.dataset.inv)));
-  $('#run-billing').addEventListener('click', () => formModal('Run billing', [
-    { name: 'as_of', label: 'Bill everything due on or before', type: 'date', required: true, value: today() },
-    { name: 'auto_confirm', label: 'Confirm invoices straight away', type: 'checkbox', value: false },
-  ], async v => {
-    const r = await api('/billing/run', { method: 'POST', body: v });
-    openModal('Billing run complete', `<div class="grid grid-cols-2 gap-3 text-sm">
-      <div class="card kpi"><div class="k">Subscriptions due</div><div class="v">${r.subscriptions_scanned}</div></div>
-      <div class="card kpi"><div class="k">Invoices created</div><div class="v text-teal">${r.invoices_created}</div></div>
-      <div class="card kpi"><div class="k">Already invoiced (skipped)</div><div class="v">${r.skipped_existing}</div></div>
-      <div class="card kpi"><div class="k">Auto-closed at expiry</div><div class="v">${r.subscriptions_closed}</div></div></div>
-      ${r.invoice_numbers.length ? `<p class="text-sm text-gray-600 mt-4">New: ${r.invoice_numbers.slice(0, 30).join(', ')}${r.invoice_numbers.length > 30 ? '…' : ''}</p>`
-        : '<p class="text-sm text-gray-500 mt-4">Nothing was due. Running it again is always safe.</p>'}`,
-      { footer: '<button class="btn btn-primary" data-close>Done</button>' });
-    refresh();
-  }, { submitLabel: 'Run billing' }));
+  $('#run-billing').addEventListener('click', runBillingDialog);
 }
 
 async function showInvoice(id) {

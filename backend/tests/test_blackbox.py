@@ -115,3 +115,12 @@ def test_backfill_reconstructs_missing_records(client, db_session, staff, custom
         assert blackbox.verify(s, sub_row)["ok"]
         assert {e.event_type for e in chain} >= {"created", "activated", "invoice_issued"}
         assert all('"reconstructed": true' in e.data_json for e in chain)
+
+
+def test_freshly_seeded_database_verifies(db_session):
+    """Catalog prices are whole numbers in Python but floats once stored; hashes must not depend on that."""
+    from backend.app.seed_data import seed_demo
+    with db_session() as s:
+        seed_demo(s)
+        subs = s.scalars(select(Subscription)).all()
+        assert subs and all(blackbox.verify(s, sub)["ok"] for sub in subs)

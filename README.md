@@ -9,7 +9,7 @@ a revenue forecast, a recommendations engine, a tamper-proof billing record for 
 and a proper customer portal (timeline, price-change alerts, price lock and a QR pass).
 
 **Stack:** FastAPI + SQLAlchemy + SQLite on the backend, plain JavaScript + Tailwind on the frontend
-(no build step). 91 automated tests.
+(no build step). 92 automated tests.
 
 ---
 
@@ -17,7 +17,7 @@ and a proper customer portal (timeline, price-change alerts, price lock and a QR
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install fastapi "uvicorn[standard]" sqlalchemy pydantic email-validator python-dateutil pyjwt jinja2 qrcode httpx pytest
+.venv/bin/pip install -r requirements.txt
 .venv/bin/python run.py
 ```
 
@@ -189,7 +189,7 @@ backend/app/
     blackbox               hash-chained event recorder and report data
     customer_features      timeline, price changes, renewal lock, QR pass
   routers/                 API endpoints
-backend/tests/             91 tests (per brief phase, plus one file per extra)
+backend/tests/             92 tests (per brief phase, plus one file per extra)
 frontend/
   templates/               index.html (the app), invoice print, black box report, pass check page
   static/                  app.js, styles.css

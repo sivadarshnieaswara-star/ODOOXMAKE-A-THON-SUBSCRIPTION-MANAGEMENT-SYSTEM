@@ -129,6 +129,7 @@ class PlanIn(BaseModel):
     allow_early_close: bool = True
     allow_pause: bool = False
     allow_renewal: bool = True
+    max_pause_days: int | None = Field(default=None, ge=1, le=365)
     is_active: bool = True
 
 
@@ -238,6 +239,10 @@ class SubscriptionOut(ORM):
     payment_terms: str
     status: str
     quotation_valid_until: date | None
+    paused_at: date | None = None
+    resume_on: date | None = None
+    pause_reason: str | None = None
+    max_pause_days: int | None = None
     last_billing_date: date | None
     next_billing_date: date | None
     notes: str | None
@@ -245,6 +250,12 @@ class SubscriptionOut(ORM):
     allowed_actions: list[str]
     lines: list[SubLineOut] = []
     events: list[SubEventOut] = []
+
+
+class SubActionIn(BaseModel):
+    """Optional details for an action; only pause uses them today."""
+    resume_on: date | None = None
+    reason: str | None = Field(default=None, max_length=255)
 
 
 class PortalSubscribeIn(BaseModel):
@@ -348,6 +359,7 @@ class BillingRunOut(BaseModel):
     invoice_numbers: list[str]
     subscriptions_closed: int
     skipped_existing: int
+    subscriptions_resumed: int = 0
 
 
 # ---------- Payments ----------

@@ -160,7 +160,8 @@ def allowed_actions(sub: Subscription, role: str, today: date | None = None) -> 
             if sub.status in src and role in roles and _policy_block(sub, a, today) is None]
 
 
-def transition(db: Session, sub: Subscription, action: str, actor: User, today: date | None = None) -> Subscription:
+def transition(db: Session, sub: Subscription, action: str, actor: User, today: date | None = None,
+               resume_on: date | None = None, reason: str | None = None) -> Subscription:
     today = today or date.today()
     if action not in TRANSITIONS:
         raise HTTPException(400, f"Unknown action '{action}'")
@@ -169,9 +170,9 @@ def transition(db: Session, sub: Subscription, action: str, actor: User, today: 
         raise HTTPException(403, f"Your role cannot perform '{action}'")
     if sub.status not in src:
         raise HTTPException(400, f"Cannot {action.replace('_', ' ')} a subscription in '{sub.status}' state")
-    reason = _policy_block(sub, action, today)
-    if reason:
-        raise HTTPException(400, reason)
+    blocked = _policy_block(sub, action, today)
+    if blocked:
+        raise HTTPException(400, blocked)
 
     previous = sub.status
     if action == "send_quotation" and sub.quotation_valid_until is None:
@@ -183,10 +184,17 @@ def transition(db: Session, sub: Subscription, action: str, actor: User, today: 
                                      f"{sub.plan.min_quantity} (this subscription has {total_qty})")
     elif action == "activate":
         sub.next_billing_date = sub.start_date
+    elif action == "pause":
+        limit = sub.plan.max_pause_days
+        if resume_on is not None and resume_on <= today:
+            raise HTTPException(400, "The resume date must be in the future")
+        if limit:
+            resume_on = resume_on or today + timedelta(days=limit)
+            if (resume_on - today).days > limit:
+                raise HTTPException(400, f"Plan '{sub.plan.name}' allows pauses of at most {limit} days")
+        sub.paused_at, sub.resume_on, sub.pause_reason = today, resume_on, (reason or None)
     elif action == "resume":
-        # Periods spent paused are not billed: billing restarts from today at the earliest.
-        if sub.next_billing_date is None or sub.next_billing_date < today:
-            sub.next_billing_date = today
+        _resume(sub, today)
     elif action == "renew":
         # Extend by the length of the current term (e.g. a 12-month contract renews for 12 more months).
         next_term_start = sub.expiry_date + timedelta(days=1)
@@ -196,11 +204,30 @@ def transition(db: Session, sub: Subscription, action: str, actor: User, today: 
     if target in ("closed",):
         sub.closed_at = today
         sub.next_billing_date = None
+        sub.paused_at = sub.resume_on = sub.pause_reason = None
     if target:
         sub.status = target
     log_event(sub, previous, sub.status, action, actor)
     db.flush()
     return sub
+
+
+def _resume(sub: Subscription, today: date) -> None:
+    # Periods spent paused are not billed: billing restarts from the resume day at the earliest.
+    if sub.next_billing_date is None or sub.next_billing_date < today:
+        sub.next_billing_date = today
+    sub.paused_at = sub.resume_on = sub.pause_reason = None
+
+
+def auto_resume_due(db: Session, today: date) -> int:
+    """Resume paused subscriptions whose scheduled resume date has arrived (billed from that date)."""
+    subs = db.scalars(select(Subscription).where(Subscription.status == "paused", Subscription.resume_on <= today)).all()
+    for sub in subs:
+        _resume(sub, sub.resume_on)
+        sub.status = "active"
+        log_event(sub, "paused", "active", "auto_resume", None)
+    db.flush()
+    return len(subs)
 
 
 def auto_close_expired(db: Session, today: date) -> int:
@@ -213,6 +240,7 @@ def auto_close_expired(db: Session, today: date) -> int:
     for sub in subs:
         previous = sub.status
         sub.status, sub.closed_at, sub.next_billing_date = "closed", today, None
+        sub.paused_at = sub.resume_on = sub.pause_reason = None
         log_event(sub, previous, "closed", "auto_close", None)
     db.flush()
     return len(subs)

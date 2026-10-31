@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..models import PAYMENT_TERMS, DiscountRule, Invoice, InvoiceLine, Subscription, User
 from .common import next_number, send_email
 from .discount_service import DraftLine, best_discount
-from .subscription_service import auto_close_expired, next_period_start
+from .subscription_service import auto_close_expired, auto_resume_due, next_period_start
 from .tax_service import default_tax_rate, tax_rate_for_product
 
 MAX_CATCH_UP_PERIODS = 400  # safety valve for very old daily subscriptions
@@ -72,6 +72,7 @@ def run_billing(db: Session, as_of: date | None = None, auto_confirm: bool = Fal
     lookup and by a unique constraint, and next_billing_date only moves forward. Missed periods
     are caught up so nothing is skipped; billing stops at the subscription's expiry date."""
     as_of = as_of or date.today()
+    resumed = auto_resume_due(db, as_of)   # scheduled resumes first, so they're billed from their resume date
     due = db.scalars(
         select(Subscription)
         .where(Subscription.status == "active", Subscription.next_billing_date <= as_of)
@@ -107,7 +108,8 @@ def run_billing(db: Session, as_of: date | None = None, auto_confirm: bool = Fal
     closed = auto_close_expired(db, as_of)
     db.commit()
     return dict(as_of=as_of, subscriptions_scanned=len(due), invoices_created=len(created),
-                invoice_numbers=created, subscriptions_closed=closed, skipped_existing=skipped)
+                invoice_numbers=created, subscriptions_closed=closed, skipped_existing=skipped,
+                subscriptions_resumed=resumed)
 
 
 def bill_now(db: Session, sub: Subscription, auto_confirm: bool = False) -> Invoice:

@@ -13,6 +13,8 @@ def sub_out(sub: Subscription, viewer: User, detail: bool = True) -> dict:
         "billing_frequency": sub.plan.billing_frequency, "start_date": sub.start_date,
         "expiry_date": sub.expiry_date, "payment_terms": sub.payment_terms, "status": sub.status,
         "quotation_valid_until": sub.quotation_valid_until, "last_billing_date": sub.last_billing_date,
+        "paused_at": sub.paused_at, "resume_on": sub.resume_on, "pause_reason": sub.pause_reason,
+        "max_pause_days": sub.plan.max_pause_days,
         "next_billing_date": sub.next_billing_date, "notes": sub.notes,
         "recurring_amount": sub.recurring_amount, "allowed_actions": allowed_actions(sub, viewer.role),
         "lines": [{

@@ -6,9 +6,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config
-from .database import Base, SessionLocal, engine
+from .database import Base, SessionLocal, add_missing_columns, engine
 from .routers import (
-    auth_router, billing_router, catalog_router, forecast_router, product_router, staff_router, subscription_router,
+    auth_router, billing_router, catalog_router, forecast_router, product_router, recommendation_router, staff_router,
+    subscription_router,
 )
 from .seed_data import bootstrap_admin, seed_demo
 
@@ -18,6 +19,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
+    add_missing_columns(engine)
     with SessionLocal() as db:
         bootstrap_admin(db)
         if config.SEED_DEMO_DATA:
@@ -27,7 +29,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Brightloop Subscription Management System", version="1.0.0", lifespan=lifespan)
 
-for r in (auth_router, staff_router, product_router, catalog_router, subscription_router, billing_router, forecast_router):
+for r in (auth_router, staff_router, product_router, catalog_router, subscription_router, billing_router, forecast_router,
+          recommendation_router):
     app.include_router(r.router)
 
 app.mount("/static", StaticFiles(directory=config.FRONTEND_DIR / "static"), name="static")

@@ -449,7 +449,7 @@ function renderAuth(mode = 'login') {
 // ---------- shell & routing ----------
 // [route, label, icon, flow step]
 const STAFF_NAV = [
-  ['Overview'], ['dashboard', 'Dashboard', 'layout-dashboard'], ['forecast', 'AI revenue forecast', 'sparkles'],
+  ['Overview'], ['dashboard', 'Dashboard', 'layout-dashboard'], ['forecast', 'AI revenue forecast', 'sparkles'], ['recommendations', 'Recommendations', 'lightbulb'],
   ['Revenue flow'], ['templates', 'Quotation templates', 'file-text', '01'], ['subscriptions', 'Subscriptions', 'repeat', '02'],
   ['invoices', 'Invoices', 'receipt', '03'], ['payments', 'Payments', 'wallet', '04'],
   ['Records'], ['customers', 'Customers', 'users'], ['products', 'Products', 'package'], ['plans', 'Plans', 'calendar-clock'],
@@ -528,7 +528,7 @@ function renderShell() {
 }
 
 const VIEWS = {
-  dashboard: viewDashboard, forecast: viewForecast, subscriptions: viewSubscriptions, templates: viewTemplates, invoices: viewInvoices,
+  dashboard: viewDashboard, forecast: viewForecast, recommendations: viewRecommendations, subscriptions: viewSubscriptions, templates: viewTemplates, invoices: viewInvoices,
   payments: viewPayments, customers: viewCustomers, products: viewProducts, plans: viewPlans, taxes: viewTaxes,
   discounts: viewDiscounts, staff: viewStaff, outbox: viewOutbox,
   'my-subscriptions': viewMySubscriptions, 'my-invoices': viewMyInvoices, 'my-payments': viewMyPayments,
@@ -613,7 +613,8 @@ function runBillingDialog() {
       <div class="card kpi"><div class="k">Subscriptions due</div><div class="v">${r.subscriptions_scanned}</div></div>
       <div class="card kpi"><div class="k">Invoices created</div><div class="v text-teal">${r.invoices_created}</div></div>
       <div class="card kpi"><div class="k">Already invoiced (skipped)</div><div class="v">${r.skipped_existing}</div></div>
-      <div class="card kpi"><div class="k">Auto-closed at expiry</div><div class="v">${r.subscriptions_closed}</div></div></div>
+      <div class="card kpi"><div class="k">Auto-closed at expiry</div><div class="v">${r.subscriptions_closed}</div></div>
+      ${r.subscriptions_resumed ? `<div class="card kpi col-span-2"><div class="k">Resumed from a pause</div><div class="v">${r.subscriptions_resumed}</div></div>` : ''}</div>
       ${r.invoice_numbers.length ? `<p class="text-sm text-slate-600 mt-4">New: ${r.invoice_numbers.slice(0, 30).join(', ')}${r.invoice_numbers.length > 30 ? '…' : ''}</p>`
         : '<p class="text-sm text-slate-500 mt-4">Nothing was due. Running it again is always safe.</p>'}`,
       { footer: '<button class="btn btn-primary" data-close>Done</button>' });
@@ -661,6 +662,7 @@ async function viewDashboard(main) {
       ${stat('hourglass', 'Outstanding', money(s.outstanding_amount), `${s.outstanding_count} confirmed invoices unpaid`, 'amber')}
       ${stat('alert-triangle', 'Overdue', money(s.overdue_amount), `${s.overdue_count} invoices past their due date`, s.overdue_count ? 'red' : 'green')}
     </div>
+    <div id="dash-recs"></div>
 
     <div class="mb-6 grid gap-6 lg:grid-cols-3">
       <div class="card overflow-hidden lg:col-span-2">
@@ -721,6 +723,14 @@ async function viewDashboard(main) {
   $('#df').addEventListener('submit', e => { e.preventDefault(); Object.assign(S.dash, Object.fromEntries(new FormData(e.target))); refresh(); });
   $('#dreset').addEventListener('click', () => { S.dash = { date_from: '', date_to: '', plan_id: '', customer_id: '' }; refresh(); });
   $('#run-billing').addEventListener('click', runBillingDialog);
+  api('/recommendations').then(d => {
+    const top = d.items.filter(r => !r.dismissed).slice(0, 2);
+    if (!top.length || !$('#dash-recs')) return;
+    $('#dash-recs').innerHTML = `<div class="mb-6"><div class="mb-3 flex items-center justify-between"><h2 class="flex items-center gap-2 font-semibold">${icon('lightbulb', 'h-4 w-4 text-brand-700')} Recommended next</h2>
+      <a href="#/recommendations" class="text-sm text-brand-700">All ${d.open} recommendations →</a></div>
+      <div class="grid gap-4 lg:grid-cols-2">${top.map(r => recCard(r, true)).join('')}</div></div>`;
+    wireRecs($('#dash-recs'));
+  }).catch(() => {});
   $('#go-invoices').addEventListener('click', () => { location.hash = '#/invoices'; });
 }
 
@@ -916,6 +926,134 @@ function renderForecast(d, ms) {
     </div>`;
 }
 
+// ---------- recommendations ----------
+const REC_CATEGORY = { Collections: ['hand-coins', 'red'], Operations: ['settings-2', 'blue'], Renewals: ['refresh-cw', 'amber'],
+  Retention: ['life-buoy', 'red'], Growth: ['rocket', 'green'], Sales: ['handshake', 'brand'], Pricing: ['tag', 'brand'] };
+const PRIORITY_BADGE = { high: 'b-red', medium: 'b-amber', low: 'b-slate' };
+
+function recCard(r, compact = false) {
+  const [ic, tone] = REC_CATEGORY[r.category] || ['lightbulb', 'brand'];
+  const act = r.action;
+  const actBtn = !act ? '' : act.type === 'link'
+    ? `<a class="btn btn-light btn-sm" href="${act.href}">${icon('arrow-right')} ${esc(act.label)}</a>`
+    : `<button class="btn btn-primary btn-sm" data-rec-run="${r.key}">${icon(act.safe ? 'zap' : 'send')} ${esc(act.label)}</button>`;
+  const items = r.items.map(it => `<tr${it.invoice_id ? ` class="clickable" data-inv="${it.invoice_id}"` : it.subscription_id ? ` class="clickable" data-sub="${it.subscription_id}"` : ''}>
+      <td>${esc(it.label)}</td><td class="text-slate-500">${esc(it.note || '')}</td><td class="num">${it.value != null ? money(it.value) : ''}</td></tr>`).join('');
+  return `<div class="card overflow-hidden ${r.dismissed ? 'opacity-60' : ''}">
+    <div class="flex flex-wrap items-start gap-4 p-5">
+      <div class="stat-icon tone-${tone} !mb-0">${icon(ic)}</div>
+      <div class="min-w-[220px] flex-1">
+        <div class="mb-1 flex flex-wrap items-center gap-2"><span class="badge ${PRIORITY_BADGE[r.priority]}">${r.priority}</span>
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">${esc(r.category)}</span>
+          ${r.dismissed ? '<span class="badge b-slate">snoozed</span>' : ''}${act && act.safe ? '<span class="badge b-teal">autopilot</span>' : ''}</div>
+        <div class="font-semibold text-ink">${esc(r.title)}</div>
+        <p class="mt-1 text-sm text-slate-600">${esc(r.detail)}</p></div>
+      ${r.impact ? `<div class="text-right"><div class="text-xl font-bold tabular-nums">${compact_(r.impact)}</div><div class="text-xs text-slate-500">${esc(r.impact_label)}</div></div>` : ''}
+    </div>
+    ${compact ? '' : `<details class="border-t border-slate-100"><summary class="cursor-pointer px-5 py-2.5 text-sm text-slate-500 hover:text-ink">
+        ${r.item_count} record${r.item_count === 1 ? '' : 's'}${r.item_count > r.items.length ? ` (showing ${r.items.length})` : ''}</summary>
+      <div class="overflow-x-auto"><table class="tbl"><tbody>${items}</tbody></table></div></details>`}
+    <div class="flex flex-wrap items-center gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">${actBtn}
+      ${compact ? '' : r.dismissed ? `<button class="btn btn-ghost btn-sm" data-rec-restore="${r.key}">Restore</button>`
+        : `<button class="btn btn-ghost btn-sm" data-rec-dismiss="${r.key}">Snooze 30 days</button>`}</div></div>`;
+}
+const compact_ = v => (Math.abs(v) >= 1e6 ? '$' + (v / 1e6).toFixed(2) + 'M' : Math.abs(v) >= 1e4 ? '$' + Math.round(v / 1e3) + 'k' : money(v));
+
+function wireRecs(root) {
+  $$('[data-rec-run]', root).forEach(b => b.addEventListener('click', async () => {
+    b.disabled = true;
+    const r = await run(() => api(`/recommendations/${b.dataset.recRun}/run`, { method: 'POST' })).catch(() => null);
+    if (r) { toast(r.summary); refresh(); } else b.disabled = false;
+  }));
+  $$('[data-rec-dismiss]', root).forEach(b => b.addEventListener('click', async () => {
+    await run(() => api(`/recommendations/${b.dataset.recDismiss}/dismiss`, { method: 'POST' }), 'Snoozed for 30 days'); refresh();
+  }));
+  $$('[data-rec-restore]', root).forEach(b => b.addEventListener('click', async () => {
+    await run(() => api(`/recommendations/${b.dataset.recRestore}/restore`, { method: 'POST' })); refresh();
+  }));
+  $$('[data-inv]', root).forEach(tr => tr.addEventListener('click', () => showInvoice(tr.dataset.inv)));
+  $$('[data-sub]', root).forEach(tr => tr.addEventListener('click', () => { location.hash = '#/subscriptions/' + tr.dataset.sub; }));
+}
+
+async function viewRecommendations(main) {
+  const data = await api('/recommendations');
+  const open = data.items.filter(r => !r.dismissed);
+  const snoozed = data.items.filter(r => r.dismissed);
+  const byCat = {};
+  open.forEach(r => { byCat[r.category] = (byCat[r.category] || 0) + 1; });
+  const high = open.filter(r => r.priority === 'high').length;
+  const safe = open.filter(r => r.action && r.action.safe).length;
+  main.innerHTML = pageHeader('Recommendations',
+    'Checked against live data every time you open this page: what to chase, who to renew, who to upsell and what\'s waiting. Act in one click, or let autopilot handle the routine ones.',
+    isAdmin() ? `<button class="btn btn-primary" id="autopilot" ${safe ? '' : 'disabled'}>${icon('bot')} Run autopilot${safe ? ` (${safe})` : ''}</button>` : '',
+    'Automation · Recommendations') + `
+    <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      ${stat('lightbulb', 'Open recommendations', open.length, `${snoozed.length} snoozed`)}
+      ${stat('flame', 'High priority', high, 'act on these first', high ? 'red' : 'green')}
+      ${stat('bot', 'Autopilot-ready', safe, 'reminders, follow-ups, billing', 'blue')}
+      ${stat('history', 'Automations run', data.activity.length, data.activity[0] ? `last: ${new Date(data.activity[0].created_at + 'Z').toLocaleString()}` : 'none yet', 'amber')}
+    </div>
+    <div class="grid gap-6 lg:grid-cols-3">
+      <div class="space-y-4 lg:col-span-2" id="rec-list">
+        ${Object.keys(byCat).length ? `<div class="flex flex-wrap gap-2">${Object.entries(byCat).map(([c, n]) => `<span class="badge b-slate">${esc(c)} · ${n}</span>`).join('')}</div>` : ''}
+        ${open.map(r => recCard(r)).join('') || `<div class="card flex flex-col items-center px-6 py-14 text-center">
+          <div class="stat-icon tone-green">${icon('check-circle-2')}</div><div class="font-semibold">All clear</div>
+          <p class="mt-1 max-w-sm text-sm text-slate-600">Nothing needs attention right now. New recommendations appear as invoices age, contracts approach expiry and customers change.</p></div>`}
+        ${snoozed.length ? `<details class="mt-2"><summary class="cursor-pointer text-sm text-slate-500">${snoozed.length} snoozed</summary>
+          <div class="mt-4 space-y-4">${snoozed.map(r => recCard(r)).join('')}</div></details>` : ''}
+      </div>
+      <div class="card h-fit overflow-hidden">
+        <div class="card-head"><div class="t">${icon('history')} Automation activity</div></div>
+        <ol class="space-y-3 p-5 text-sm">${data.activity.map(a => `<li class="flex gap-3">
+          <span class="mt-1 grid h-6 w-6 shrink-0 place-items-center rounded-full ${a.autopilot ? 'tone-blue' : 'tone-brand'}">${icon(a.autopilot ? 'bot' : 'user', 'h-3.5 w-3.5')}</span>
+          <div><div class="font-medium">${esc(a.summary)}</div><div class="text-xs text-slate-500">${new Date(a.created_at + 'Z').toLocaleString()} · ${a.autopilot ? 'autopilot' : esc(a.actor_email)}</div></div></li>`).join('')
+          || '<li class="text-slate-400">Nothing has run yet.</li>'}</ol></div>
+    </div>`;
+  wireRecs(main);
+  $('#autopilot')?.addEventListener('click', async e => {
+    const b = e.target.closest('button'); b.disabled = true;
+    b.innerHTML = '<span class="spinner !h-4 !w-4 !border-2"></span> Running…';
+    const r = await run(() => api('/recommendations/autopilot', { method: 'POST' })).catch(() => null);
+    if (r) toast(r.actions.length ? r.actions.map(a => a.summary).join(' · ') : 'Nothing needed doing', 'ok');
+    refresh();
+  });
+}
+
+// ---------- pause dialog ----------
+function pauseDialog(sub) {
+  const max = sub.max_pause_days;
+  const iso = d => d.toISOString().slice(0, 10);
+  const plus = n => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };
+  const presets = [[14, '2 weeks'], [30, '1 month'], [60, '2 months'], [90, '3 months']].filter(([n]) => !max || n <= max);
+  formModal(`Pause ${sub.subscription_number}`, [
+    { name: 'resume_on', label: 'Resume automatically on', type: 'date', value: max ? plus(Math.min(30, max)) : '', span: 'sm:col-span-2',
+      help: max ? `This plan allows pauses of up to ${max} days.` : 'Leave empty to pause until someone resumes it.' },
+    { name: 'reason', label: 'Reason (optional)', type: 'select', blank: '— none —', span: 'sm:col-span-2',
+      options: ['Seasonal business', 'Budget freeze', 'Temporarily not using it', 'Switching tools', 'Other'].map(r => [r, r]) },
+  ], async v => {
+    await api(`/subscriptions/${sub.id}/actions/pause`, { method: 'POST', body: { resume_on: v.resume_on, reason: v.reason } });
+    toast(v.resume_on ? `Paused. Billing resumes on ${fmtDate(v.resume_on)}` : 'Paused until resumed');
+    refresh();
+  }, {
+    submitLabel: 'Pause subscription',
+    extraHtml: `<div class="mt-4 flex flex-wrap gap-2">${presets.map(([n, l]) => `<button type="button" class="btn btn-light btn-sm" data-preset="${n}">${l}</button>`).join('')}
+      ${max ? '' : '<button type="button" class="btn btn-light btn-sm" data-preset="0">Until resumed</button>'}</div>
+      <p class="mt-4 text-sm text-slate-500">No invoices are issued while paused. When it resumes, billing restarts from that day, so the paused time is never charged.</p>`,
+    afterRender: el => {
+      const input = $('[name=resume_on]', el);
+      input.min = plus(1); if (max) input.max = plus(max);
+      $$('[data-preset]', el).forEach(b => b.addEventListener('click', () => { input.value = +b.dataset.preset ? plus(+b.dataset.preset) : ''; }));
+    },
+  });
+}
+function pauseBanner(s) {
+  if (s.status !== 'paused') return '';
+  return `<div class="mb-4 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 text-sm" style="border-color:var(--brand-100);background:var(--brand-50)">
+    <span class="text-brand-700">${icon('pause-circle', 'h-5 w-5')}</span>
+    <span><b>Paused</b>${s.paused_at ? ` since ${fmtDate(s.paused_at)}` : ''}${s.pause_reason ? ` · ${esc(s.pause_reason)}` : ''}</span>
+    <span class="ml-auto font-medium">${s.resume_on ? `Resumes automatically on ${fmtDate(s.resume_on)}` : 'Paused until resumed'}</span></div>`;
+}
+
 // ---------- subscriptions ----------
 const SUB_STATES = ['draft', 'quotation', 'confirmed', 'active', 'paused', 'closed'];
 const ACTION_LABEL = {
@@ -941,7 +1079,7 @@ async function viewSubscriptions(main) {
         <th>Next invoice</th><th class="num">Recurring</th></tr></thead><tbody>
         ${data.items.map(s => `<tr class="clickable" data-id="${s.id}"><td class="font-medium text-odoo">${s.subscription_number}</td>
           <td>${esc(s.customer_name)}</td><td>${esc(s.plan_name)}</td><td>${badge(s.status)}</td><td>${fmtDate(s.start_date)}</td>
-          <td>${fmtDate(s.expiry_date)}</td><td>${fmtDate(s.next_billing_date)}</td>
+          <td>${fmtDate(s.expiry_date)}</td><td>${s.status === 'paused' ? `<span class="text-slate-500">${s.resume_on ? 'resumes ' + fmtDate(s.resume_on) : 'paused'}</span>` : fmtDate(s.next_billing_date)}</td>
           <td class="num">${money(s.recurring_amount)}<span class="text-gray-400 text-xs"> /${FREQ[s.billing_frequency]}</span></td></tr>`).join('') || emptyRow(8)}
       </tbody></table></div>${pager(data.total, f.offset, o => { f.offset = o; refresh(); })}</div>`;
   $$('[data-st]').forEach(a => a.addEventListener('click', () => { f.status = a.dataset.st; f.offset = 0; refresh(); }));
@@ -1002,6 +1140,7 @@ function subActions(sub) {
   }).join('');
 }
 async function doSubAction(sub, action) {
+  if (action === 'pause') return pauseDialog(sub);
   const destructive = ['close', 'cancel', 'decline'].includes(action);
   if (destructive && !confirm(`${label(action)} ${sub.subscription_number}? This cannot be undone.`)) return;
   await run(() => api(`/subscriptions/${sub.id}/actions/${action}`, { method: 'POST' }), `${sub.subscription_number}: ${label(action)} done`);
@@ -1020,6 +1159,7 @@ async function viewSubscriptionDetail(main, id) {
         ${['draft', 'quotation'].includes(sub.status) ? '<button class="btn btn-light" id="edit-sub">Edit</button>' : ''}
         ${sub.status === 'active' && sub.next_billing_date ? '<button class="btn btn-light" id="bill-now">Invoice next period now</button>' : ''}</div></div>
     <div class="card p-4 mb-4">${pipeline(sub.status)}</div>
+    ${pauseBanner(sub)}
     <div class="grid lg:grid-cols-3 gap-4">
       <div class="lg:col-span-2 space-y-4">
         <div class="card"><div class="px-4 py-3 border-b font-semibold">Order lines</div><div class="overflow-x-auto"><table class="tbl">
@@ -1305,7 +1445,7 @@ async function viewPlans(main) {
       <th>Auto-close</th><th>Close early</th><th>Pause</th><th>Renew</th>${admin ? '<th></th>' : ''}</tr></thead><tbody>
     ${plans.map(p => `<tr class="${p.is_active ? '' : 'opacity-50'}"><td class="font-medium">${esc(p.name)}</td><td class="num">${money(p.cost)}</td><td class="capitalize">${p.billing_frequency}</td>
       <td class="num">${p.min_quantity}</td><td class="text-xs">${p.start_date || p.end_date ? `${fmtDate(p.start_date)} → ${fmtDate(p.end_date)}` : 'Always'}</td>
-      <td>${yes(p.auto_close_on_expiry)}</td><td>${yes(p.allow_early_close)}</td><td>${yes(p.allow_pause)}</td><td>${yes(p.allow_renewal)}</td>
+      <td>${yes(p.auto_close_on_expiry)}</td><td>${yes(p.allow_early_close)}</td><td>${p.allow_pause ? `${yes(true)}${p.max_pause_days ? ` <span class="text-xs text-slate-500">≤${p.max_pause_days}d</span>` : ''}` : yes(false)}</td><td>${yes(p.allow_renewal)}</td>
       ${admin ? `<td class="text-right"><button class="btn btn-light btn-sm" data-ed="${p.id}">Edit</button></td>` : ''}</tr>`).join('') || emptyRow(10)}</tbody></table></div>`;
   if (!admin) return;
   const fields = p => [
@@ -1321,6 +1461,7 @@ async function viewPlans(main) {
     { name: 'allow_early_close', label: 'Can be closed early', type: 'checkbox', value: p ? p.allow_early_close : true },
     { name: 'allow_pause', label: 'Can be paused', type: 'checkbox', value: p ? p.allow_pause : false },
     { name: 'allow_renewal', label: 'Can be renewed', type: 'checkbox', value: p ? p.allow_renewal : true },
+    { name: 'max_pause_days', label: 'Longest pause (days)', type: 'number', min: 1, nullable: true, value: p?.max_pause_days, help: 'Empty = no limit.' },
   ];
   const save = p => async v => { await api(p ? '/plans/' + p.id : '/plans', { method: p ? 'PUT' : 'POST', body: v }); invalidate('plans'); toast('Plan saved'); refresh(); };
   $('#new-plan').addEventListener('click', () => formModal('New plan', fields(), save()));
@@ -1419,7 +1560,8 @@ async function viewMySubscriptions(main) {
       <div class="text-2xl font-semibold mt-2">${money(s.recurring_amount)}<span class="text-sm text-gray-500 font-normal"> + tax / ${FREQ[s.billing_frequency]}</span></div>
       <div class="grid grid-cols-3 gap-2 text-sm mt-3">
         <div><div class="label">Started</div>${fmtDate(s.start_date)}</div><div><div class="label">Expires</div>${fmtDate(s.expiry_date)}</div>
-        <div><div class="label">${s.status === 'quotation' ? 'Quote valid until' : 'Next invoice'}</div>${fmtDate(s.status === 'quotation' ? s.quotation_valid_until : s.next_billing_date)}</div></div>
+        <div><div class="label">${s.status === 'quotation' ? 'Quote valid until' : s.status === 'paused' ? 'Resumes' : 'Next invoice'}</div>${s.status === 'paused' ? (s.resume_on ? fmtDate(s.resume_on) : 'when you resume') : fmtDate(s.status === 'quotation' ? s.quotation_valid_until : s.next_billing_date)}</div></div>
+      ${s.status === 'paused' ? `<div class="mt-3">${pauseBanner(s)}</div>` : ''}
       <div class="lines text-sm mt-3 text-gray-600"></div>
       <div class="flex flex-wrap gap-2 mt-4">${subActions(s)}</div></div>`).join('')
       || '<div class="card p-10 text-center text-gray-400 lg:col-span-2">You have no subscriptions yet. <a class="text-odoo" href="#/subscribe">Browse plans →</a></div>'}</div>`;

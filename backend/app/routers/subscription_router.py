@@ -8,7 +8,7 @@ from ..auth import get_current_user, require_customer, require_staff
 from ..database import get_db
 from ..models import Plan, QuotationTemplate, QuotationTemplateLine, Subscription, User
 from ..schemas import (
-    PortalSubscribeIn, SubLineIn, SubscriptionIn, SubscriptionOut, SubscriptionUpdate, TemplateIn, TemplateOut,
+    PortalSubscribeIn, SubActionIn, SubLineIn, SubscriptionIn, SubscriptionOut, SubscriptionUpdate, TemplateIn, TemplateOut,
     TemplateUseIn,
 )
 from ..serializers import sub_out, template_out
@@ -78,9 +78,10 @@ def update_subscription(sub_id: int, data: SubscriptionUpdate, user: User = Depe
 
 
 @router.post("/subscriptions/{sub_id}/actions/{action}", response_model=SubscriptionOut)
-def subscription_action(sub_id: int, action: str, user: User = Depends(get_current_user),
-                        db: Session = Depends(get_db)):
-    sub = svc.transition(db, load_subscription(db, sub_id, user), action, user)
+def subscription_action(sub_id: int, action: str, data: SubActionIn | None = None,
+                        user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    data = data or SubActionIn()
+    sub = svc.transition(db, load_subscription(db, sub_id, user), action, user, resume_on=data.resume_on, reason=data.reason)
     db.commit()
     return sub_out(sub, user)
 

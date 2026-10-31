@@ -103,6 +103,7 @@ class Plan(Base):
     allow_early_close: Mapped[bool] = mapped_column(Boolean, default=True)
     allow_pause: Mapped[bool] = mapped_column(Boolean, default=False)
     allow_renewal: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_pause_days: Mapped[int | None] = mapped_column(Integer)  # None = no limit
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -155,6 +156,9 @@ class Subscription(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     closed_at: Mapped[date | None] = mapped_column(Date)
+    paused_at: Mapped[date | None] = mapped_column(Date)
+    resume_on: Mapped[date | None] = mapped_column(Date, index=True)  # automatic resume date while paused
+    pause_reason: Mapped[str | None] = mapped_column(String(255))
 
     customer: Mapped[User] = relationship()
     plan: Mapped[Plan] = relationship()
@@ -293,6 +297,23 @@ class Payment(Base):
 
     invoice: Mapped[Invoice] = relationship(back_populates="payments")
     customer: Mapped[User] = relationship()
+
+
+class AutomationLog(Base):
+    """What the recommendations engine (or someone acting on it) did, for the activity feed."""
+    __tablename__ = "automation_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    action: Mapped[str] = mapped_column(String(40))
+    summary: Mapped[str] = mapped_column(String(500))
+    actor_email: Mapped[str | None] = mapped_column(String(255))
+    autopilot: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class RecommendationDismissal(Base):
+    __tablename__ = "recommendation_dismissals"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    until: Mapped[date] = mapped_column(Date)
 
 
 class EmailLog(Base):

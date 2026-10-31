@@ -82,6 +82,20 @@ including whether cutting churn or winning more deals moves the number more. Sli
 churn, renewals, upsells, billing and payments, all run through the normal billing engine) from that
 page so there's enough history to learn from.
 
+**Pause and resume** - a subscription can be paused with an optional resume date and a reason.
+Plans can cap how long a pause lasts. Nothing is billed while paused; the billing run resumes it
+automatically on its resume date and bills from that day, so the paused time is never charged.
+Customers can pause and resume their own subscriptions from the portal (where the plan allows it).
+
+**Recommendations** - a rules engine that checks the live data and suggests what to do next:
+overdue invoices to chase, contracts ending within 60 days, accounts at risk (long pauses or 30+ days
+overdue), loyal monthly customers to offer annual billing, upsell candidates, quotes about to expire,
+draft invoices and subscriptions due for billing, discounts running out, plans that churn faster than
+the rest, and customer concentration. Each one shows its priority, $ impact and the records involved,
+and most have a one-click action (emails, confirming drafts, running billing). The admin can run
+"autopilot", which carries out all the low-risk ones in order. Everything is logged in an activity
+feed, and recommendations can be snoozed for 30 days.
+
 ## Folder structure
 
 ```

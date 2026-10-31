@@ -80,6 +80,8 @@ def run_billing(db: Session, as_of: date | None = None, auto_confirm: bool = Fal
     lookup and by a unique constraint, and next_billing_date only moves forward. Missed periods
     are caught up so nothing is skipped; billing stops at the subscription's expiry date."""
     as_of = as_of or date.today()
+    from .customer_features import apply_due_price_changes   # local import: customer_features builds on billing's neighbours
+    apply_due_price_changes(db, as_of)     # announced price changes take effect before anything is invoiced
     resumed = auto_resume_due(db, as_of)   # scheduled resumes first, so they're billed from their resume date
     due = db.scalars(
         select(Subscription)

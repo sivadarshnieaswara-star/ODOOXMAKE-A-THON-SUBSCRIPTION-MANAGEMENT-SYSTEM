@@ -185,10 +185,17 @@ def _policy_block(sub: Subscription, action: str, today: date) -> str | None:
     return None
 
 
+def _lock_block(sub: Subscription, action: str, role: str, today: date) -> str | None:
+    if action == "close" and role == "customer" and sub.price_lock_until and sub.price_lock_until >= today:
+        return f"Your Renewal Lock commits this subscription until {sub.price_lock_until}"
+    return None
+
+
 def allowed_actions(sub: Subscription, role: str, today: date | None = None) -> list[str]:
     today = today or date.today()
     return [a for a, (src, _, roles) in TRANSITIONS.items()
-            if sub.status in src and role in roles and _policy_block(sub, a, today) is None]
+            if sub.status in src and role in roles and _policy_block(sub, a, today) is None
+            and _lock_block(sub, a, role, today) is None]
 
 
 def transition(db: Session, sub: Subscription, action: str, actor: User, today: date | None = None,
@@ -201,7 +208,7 @@ def transition(db: Session, sub: Subscription, action: str, actor: User, today: 
         raise HTTPException(403, f"Your role cannot perform '{action}'")
     if sub.status not in src:
         raise HTTPException(400, f"Cannot {action.replace('_', ' ')} a subscription in '{sub.status}' state")
-    blocked = _policy_block(sub, action, today)
+    blocked = _policy_block(sub, action, today) or _lock_block(sub, action, actor.role, today)
     if blocked:
         raise HTTPException(400, blocked)
 

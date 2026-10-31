@@ -456,8 +456,8 @@ const STAFF_NAV = [
   ['taxes', 'Taxes', 'percent'], ['discounts', 'Discounts', 'badge-percent'],
 ];
 const ADMIN_NAV = [['Admin'], ['staff', 'Staff', 'user-cog'], ['outbox', 'Email outbox', 'mail']];
-const CUSTOMER_NAV = [['my-subscriptions', 'My subscriptions'], ['my-invoices', 'Invoices'], ['my-payments', 'Payments'],
-  ['subscribe', 'Subscribe'], ['profile', 'Profile']];
+const CUSTOMER_NAV = [['my-subscriptions', 'My subscriptions'], ['timeline', 'Timeline'], ['guardian', 'Price guardian'],
+  ['passes', 'QR passes'], ['my-invoices', 'Invoices'], ['my-payments', 'Payments'], ['subscribe', 'Subscribe'], ['profile', 'Profile']];
 
 function route() {
   const [name, id] = (location.hash.replace(/^#\/?/, '') || '').split('/');
@@ -532,6 +532,7 @@ const VIEWS = {
   payments: viewPayments, customers: viewCustomers, products: viewProducts, plans: viewPlans, taxes: viewTaxes,
   discounts: viewDiscounts, staff: viewStaff, outbox: viewOutbox,
   'my-subscriptions': viewMySubscriptions, 'my-invoices': viewMyInvoices, 'my-payments': viewMyPayments,
+  timeline: viewTimeline, guardian: viewGuardian, passes: viewPasses,
   subscribe: viewSubscribe, profile: viewProfile,
 };
 const CUSTOMER_VIEWS = new Set(CUSTOMER_NAV.map(n => n[0]));
@@ -1234,12 +1235,17 @@ async function viewSubscriptionDetail(main, id) {
           ['Plan', `${esc(sub.plan_name)} <span class="text-gray-500">(billed ${sub.billing_frequency})</span>`],
           ['Start date', fmtDate(sub.start_date)], ['Expiry date', fmtDate(sub.expiry_date)],
           ['Payment terms', label(sub.payment_terms)], ['Quotation valid until', fmtDate(sub.quotation_valid_until)],
+          ['Renewal Lock', sub.price_lock_until && sub.price_lock_until >= today() ? `<span class="badge b-green">until ${fmtDate(sub.price_lock_until)}</span> <button class="text-xs text-red-600 underline" id="unlock">release</button>` : '—'],
           ['Last invoiced period', fmtDate(sub.last_billing_date)], ['Next invoice', fmtDate(sub.next_billing_date)],
         ].map(([k, v]) => `<div class="flex justify-between gap-4"><span class="text-gray-500">${k}</span><span class="text-right">${v}</span></div>`).join('')}
         ${sub.notes ? `<div class="pt-2 border-t text-gray-600">${esc(sub.notes)}</div>` : ''}</div>
         <div class="card overflow-hidden" id="bb-card"><div class="card-head"><div class="t">${icon('box')} Black box</div></div>
           <div class="flex justify-center py-8"><div class="spinner"></div></div></div></div></div>`;
   loadBlackbox(sub);
+  $('#unlock')?.addEventListener('click', async () => {
+    if (!confirm('Release this Renewal Lock? Deferred price changes will apply on the next billing run.')) return;
+    await run(() => api(`/subscriptions/${sub.id}/renewal-lock`, { method: 'DELETE' }), 'Renewal Lock released'); refresh();
+  });
   $$('[data-act]', main).forEach(b => b.addEventListener('click', () => doSubAction(sub, b.dataset.act)));
   $$('[data-inv]', main).forEach(tr => tr.addEventListener('click', () => showInvoice(tr.dataset.inv)));
   $('#edit-sub')?.addEventListener('click', () => subscriptionForm(sub));
@@ -1436,6 +1442,7 @@ async function viewProducts(main) {
   const admin = isAdmin();
   main.innerHTML = pageHeader('Products', admin ? 'Catalog with variants; variant surcharges are added to the sales price.' : 'Read-only: only the admin can change the catalog.',
     admin ? '<button class="btn btn-primary" id="new-prod">+ New product</button>' : '') + `
+    <div id="pc-card"></div>
     <div class="grid md:grid-cols-2 gap-4">${products.map(p => `<div class="card ${p.is_active ? '' : 'opacity-60'}">
       <div class="p-4 flex justify-between gap-3"><div><h3 class="font-semibold">${esc(p.name)} ${p.is_active ? '' : badge('closed', 'archived')}</h3>
         <p class="text-xs text-gray-500 capitalize">${p.product_type} · tax: ${esc(taxes.find(t => t.id === p.tax_rule_id)?.name || 'default')}</p>
@@ -1447,6 +1454,7 @@ async function viewProducts(main) {
           || `<tr><td colspan="4" class="text-gray-400 text-sm">No variants</td></tr>`}</tbody></table></div>
       ${admin ? `<div class="p-3 border-t flex gap-2"><button class="btn btn-light btn-sm" data-edp="${p.id}">Edit product</button>
         <button class="btn btn-light btn-sm" data-av="${p.id}">+ Variant</button>
+        <button class="btn btn-light btn-sm" data-pc="${p.id}">${icon('trending-up')} Price change</button>
         ${p.is_active ? `<button class="btn btn-danger btn-sm ml-auto" data-arch="${p.id}">Archive</button>` : ''}</div>` : ''}</div>`).join('')}</div>`;
   if (!admin) return;
   const prodFields = p => [
@@ -1467,6 +1475,8 @@ async function viewProducts(main) {
     { name: 'is_active', label: 'Active', type: 'checkbox', value: v ? v.is_active : true },
   ];
   const saved = msg => { invalidate('products'); toast(msg); refresh(); };
+  priceChangesCard(products);
+  $$('[data-pc]').forEach(b => b.addEventListener('click', () => priceChangeDialog(products.find(x => x.id == b.dataset.pc))));
   $('#new-prod').addEventListener('click', () => formModal('New product', prodFields(), async v => {
     await api('/products', { method: 'POST', body: v }); saved('Product created');
   }));
@@ -1602,6 +1612,203 @@ async function viewOutbox(main) {
       || '<div class="card p-10 text-center text-gray-400">No emails yet.</div>'}</div>`;
 }
 
+// ---------- customer window: timeline ----------
+const TL_STYLE = {
+  ...BB_STYLE, invoice_due: ['calendar-clock', 'blue'], contract_end: ['flag', 'amber'], lock_ends: ['lock-open', 'amber'],
+  resumes: ['play', 'green'], quote_expires: ['hourglass', 'amber'], price_change: ['trending-up', 'red'],
+  renewal_locked: ['lock', 'green'], renewal_unlocked: ['lock-open', 'amber'], price_change_notice: ['megaphone', 'amber'],
+  price_changed: ['tag', 'brand'], price_change_cancelled: ['undo-2', 'green'], pass_reissued: ['qr-code', 'brand'],
+};
+async function viewTimeline(main) {
+  S.tl = S.tl || { view: 'all', sub: '' };
+  const t = await api('/portal/timeline?months=6');
+  const subs = [...new Map(t.items.map(i => [i.subscription_id, i.subscription_number])).entries()];
+  const past = t.items.filter(i => !i.future);
+  main.innerHTML = pageHeader('Your timeline', 'Everything that has happened on your subscriptions, and what\'s coming in the next six months.', '', 'Customer window · Timeline') + `
+    <div class="mb-6 grid gap-4 sm:grid-cols-3">
+      ${stat('calendar-clock', 'Next payment', t.next_payment ? money(t.next_payment.amount) : '—', t.next_payment ? `${fmtDate(t.next_payment.date)} · ${t.next_payment.subscription_number}` : 'nothing scheduled', 'blue')}
+      ${stat('wallet', 'Next 6 months', money(t.upcoming_total), 'estimated invoices incl. tax, before discounts')}
+      ${stat('history', 'Events on record', past.length, `across ${subs.length} subscription${subs.length === 1 ? '' : 's'}`, 'green')}
+    </div>
+    <div class="card mb-6 flex flex-wrap items-center gap-2 p-3">
+      ${[['all', 'Everything'], ['future', 'Coming up'], ['past', 'History']].map(([k, l]) => `<button class="btn btn-sm ${S.tl.view === k ? 'btn-primary' : 'btn-ghost'}" data-tlv="${k}">${l}</button>`).join('')}
+      <select class="input ml-auto !w-56" id="tl-sub"><option value="">All subscriptions</option>
+        ${subs.map(([id, n]) => `<option value="${id}" ${String(id) === S.tl.sub ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <div id="tl-body"></div>`;
+  const draw = () => {
+    const items = t.items.filter(i => (S.tl.view === 'all' || (S.tl.view === 'future') === i.future) && (!S.tl.sub || String(i.subscription_id) === S.tl.sub));
+    let html = '', month = '', todayDone = false;
+    for (const i of items) {
+      if (!todayDone && i.future) {
+        html += `<div id="tl-today" class="relative my-6 flex items-center gap-3"><span class="h-px flex-1 bg-brand-600"></span>
+          <span class="badge b-teal">${icon('map-pin', 'h-3 w-3')} Today · ${fmtDate(t.today)}</span><span class="h-px flex-1 bg-brand-600"></span></div>`;
+        todayDone = true;
+      }
+      const m = i.date.slice(0, 7);
+      if (m !== month) {
+        month = m;
+        html += `<div class="mb-2 mt-6 text-xs font-bold uppercase tracking-widest text-slate-500">${new Date(m + '-01T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</div>`;
+      }
+      const [ic, tone] = TL_STYLE[i.kind] || ['circle', 'brand'];
+      html += `<div class="relative flex gap-4 pb-3 pl-1">
+        <div class="flex flex-col items-center"><span class="stat-icon tone-${tone} !mb-0 !p-1.5 ${i.future ? 'ring-1 ring-dashed ring-slate-300' : ''}">${icon(ic, '!h-4 !w-4')}</span>
+          <span class="mt-1 w-px flex-1 ${i.future ? 'border-l border-dashed border-slate-300' : 'bg-slate-200'}"></span></div>
+        <div class="card mb-1 flex-1 px-4 py-3 ${i.future ? 'border-dashed' : ''}">
+          <div class="flex flex-wrap justify-between gap-2"><span class="font-medium">${esc(i.title)}</span>
+            ${i.amount != null ? `<span class="font-semibold tabular-nums ${i.kind === 'price_change' ? 'text-red-600' : ''}">${i.kind === 'price_change' && i.amount > 0 ? '+' : ''}${money(i.amount)}</span>` : ''}</div>
+          <div class="text-xs text-slate-500">${fmtDate(i.date)} · ${i.subscription_number}${i.future ? ' · upcoming' : ''}</div></div></div>`;
+    }
+    $('#tl-body').innerHTML = html || '<div class="card p-10 text-center text-slate-400">Nothing to show for this filter.</div>';
+    $('#tl-today')?.scrollIntoView({ block: 'center' });
+  };
+  $$('[data-tlv]').forEach(b => b.addEventListener('click', () => { S.tl.view = b.dataset.tlv; viewTimeline(main); }));
+  $('#tl-sub').addEventListener('change', e => { S.tl.sub = e.target.value; draw(); });
+  draw();
+}
+
+// ---------- customer window: Price Change Guardian + Renewal Lock ----------
+function lockDialog(o) {
+  openModal(`Renewal Lock · ${o.subscription_number}`, `
+    <div class="flex gap-4"><div class="stat-icon tone-green !mb-0 h-fit">${icon('lock')}</div><div class="text-sm">
+      <p class="font-semibold text-base">Lock today's price until ${fmtDate(o.lock_until)}</p>
+      <p class="mt-2 text-slate-600">Your current ${money(o.recurring_amount)} per ${FREQ[o.frequency]} stays the same through your next renewal,
+        even if Brightloop raises prices.${o.would_save ? ` On the changes already announced, that saves you about <b>${money(o.would_save)}</b>.` : ''}</p>
+      <p class="mt-2 text-slate-600">In return you agree to keep the subscription until then: you won't be able to cancel early while the lock is on.
+        Pausing still works if your plan allows it.</p></div></div>`,
+    { footer: `<button class="btn btn-light" data-close>Not now</button><button class="btn btn-primary" id="do-lock">${icon('lock')} Lock my price</button>` });
+  $('#do-lock').addEventListener('click', async () => {
+    await run(() => api(`/subscriptions/${o.subscription_id}/renewal-lock`, { method: 'POST' }), `Price locked until ${fmtDate(o.lock_until)}`);
+    document.querySelector('.modal-bg')?.remove(); refresh();
+  });
+}
+async function viewGuardian(main) {
+  const g = await api('/portal/guardian');
+  const banner = {
+    clear: ['shield-check', 'green', 'All clear', 'No price changes or discount endings ahead on your subscriptions.'],
+    protected: ['shield-check', 'green', 'You\'re protected', 'Price changes have been announced, but your Renewal Lock keeps your current prices.'],
+    attention: ['shield-alert', 'amber', 'Changes ahead', 'Something will change what you pay. Here\'s exactly what, when and by how much.'],
+  }[g.status];
+  const locks = g.locks;
+  main.innerHTML = pageHeader('Price Change Guardian', 'We watch for anything that changes what you pay and tell you before it happens.', '', 'Customer window · Guardian') + `
+    <div class="card mb-6 flex flex-wrap items-center gap-4 p-5">
+      <div class="stat-icon tone-${banner[1]} !mb-0">${icon(banner[0])}</div>
+      <div class="flex-1"><div class="text-lg font-semibold">${banner[2]}</div><div class="text-sm text-slate-600">${banner[3]}</div></div>
+      ${g.yearly_exposure ? `<div class="text-right"><div class="text-2xl font-bold text-red-600 tabular-nums">+${money(g.yearly_exposure)}</div><div class="text-xs text-slate-500">a year if nothing changes</div></div>` : ''}
+      ${g.yearly_protected ? `<div class="text-right"><div class="text-2xl font-bold text-teal tabular-nums">${money(g.yearly_protected)}</div><div class="text-xs text-slate-500">a year held off by your lock</div></div>` : ''}
+    </div>
+    <div class="grid gap-6 lg:grid-cols-3">
+      <div class="space-y-6 lg:col-span-2">
+        <div class="card overflow-hidden"><div class="card-head"><div class="t">${icon('megaphone')} Price changes ahead</div></div>
+          ${g.changes.map(c => `<div class="flex flex-wrap items-center gap-4 border-b border-slate-100 p-5 last:border-0">
+            <div class="min-w-[220px] flex-1"><div class="font-semibold">${esc(c.product)} <span class="text-sm font-normal text-slate-500">on ${c.subscription_number}</span></div>
+              <div class="mt-1 text-sm"><span class="text-slate-500 line-through">${money(c.old_unit)}</span> → <b>${money(c.new_unit)}</b> per unit
+                ${c.change_pct != null ? `<span class="badge ${c.change_pct > 0 ? 'b-red' : 'b-green'} ml-1">${c.change_pct > 0 ? '+' : ''}${c.change_pct}%</span>` : ''} · ${c.quantity} unit${c.quantity === 1 ? '' : 's'}</div>
+              <div class="mt-1 text-xs text-slate-500">Announced ${fmtDate(c.announced_on)}${c.note ? ` · ${esc(c.note)}` : ''}</div></div>
+            <div class="text-right"><div class="font-semibold tabular-nums ${c.per_month > 0 ? 'text-red-600' : 'text-teal'}">${c.per_month > 0 ? '+' : ''}${money(c.per_month)}/mo</div>
+              <div class="text-xs text-slate-500">${c.per_year > 0 ? '+' : ''}${money(c.per_year)} a year</div></div>
+            <div class="w-full sm:w-auto text-right">${c.deferred_by_lock
+              ? `<span class="badge b-green">${icon('lock', 'h-3 w-3')} Locked until ${fmtDate(new Date(new Date(c.your_effective_on).getTime() - 864e5).toISOString().slice(0, 10))}</span>`
+              : `<div class="text-sm font-medium">From ${fmtDate(c.your_effective_on)}</div><div class="text-xs text-slate-500">in ${c.days_until} days</div>
+                 ${c.lock_would_save ? `<button class="btn btn-primary btn-sm mt-2" data-lock="${c.subscription_id}">${icon('lock')} Lock & save ${money(c.lock_would_save)}</button>` : ''}`}</div>
+          </div>`).join('') || `<div class="p-6 text-sm text-slate-500">No price changes have been announced for anything you use.</div>`}</div>
+        <div class="card overflow-hidden"><div class="card-head"><div class="t">${icon('receipt')} Your next invoices</div><div class="s">estimates incl. tax, before discounts</div></div>
+          <div class="overflow-x-auto"><table class="tbl"><thead><tr><th>Subscription</th><th>Date</th><th class="num">Last invoice</th><th class="num">Next (est.)</th><th class="num">Change</th></tr></thead><tbody>
+          ${g.forecasts.map(f => `<tr><td><b>${f.subscription_number}</b><div class="text-xs text-slate-500">${esc(f.plan)}</div></td><td>${fmtDate(f.on)}</td>
+            <td class="num">${f.last_total != null ? money(f.last_total) : '—'}</td><td class="num font-semibold">${money(f.estimate)}</td>
+            <td class="num ${f.change > 0.5 ? 'text-red-600' : f.change < -0.5 ? 'text-teal' : 'text-slate-500'}">${f.change == null ? '—' : (f.change > 0 ? '+' : '') + money(f.change)}</td></tr>`).join('') || emptyRow(5, 'No upcoming invoices.')}
+          </tbody></table></div></div>
+        ${g.alerts.length ? `<div class="card overflow-hidden"><div class="card-head"><div class="t">${icon('bell')} Watch list</div></div>
+          <div class="space-y-4 p-5">${g.alerts.map(a => `<div class="flex gap-3"><div class="stat-icon tone-${a.tone} !mb-0 h-fit">${icon(a.tone === 'blue' ? 'info' : 'alert-circle')}</div>
+            <div><div class="text-sm font-semibold">${esc(a.title)} <span class="font-normal text-slate-500">· ${a.subscription_number}</span></div><p class="text-sm text-slate-600">${esc(a.body)}</p></div></div>`).join('')}</div></div>` : ''}
+      </div>
+      <div class="card h-fit overflow-hidden"><div class="card-head"><div class="t">${icon('lock')} Renewal Lock</div></div>
+        <div class="space-y-3 p-5">
+          <p class="text-sm text-slate-600">Lock today's price through your next renewal. In exchange, you keep the subscription until then.</p>
+          ${locks.map(o => `<div class="rounded-xl border border-slate-200 p-4">
+            <div class="flex items-center justify-between"><b>${o.subscription_number}</b>${o.locked ? `<span class="badge b-green">${icon('lock', 'h-3 w-3')} Locked</span>` : ''}</div>
+            <div class="text-xs text-slate-500">${esc(o.plan)} · ${money(o.recurring_amount)}/${FREQ[o.frequency]}</div>
+            ${o.locked ? `<div class="mt-2 text-sm">Price fixed until <b>${fmtDate(o.locked_until)}</b></div>`
+              : o.can_lock ? `<button class="btn btn-light btn-sm mt-3 w-full" data-lock="${o.subscription_id}">${icon('lock')} Lock until ${fmtDate(o.lock_until)}${o.would_save ? ` · save ${money(o.would_save)}` : ''}</button>`
+              : `<div class="mt-2 text-xs text-slate-500">${esc(o.reason)}</div>`}</div>`).join('') || '<p class="text-sm text-slate-400">No active subscriptions.</p>'}
+        </div></div>
+    </div>`;
+  $$('[data-lock]', main).forEach(b => b.addEventListener('click', () => lockDialog(locks.find(o => o.subscription_id == b.dataset.lock))));
+}
+
+// ---------- customer window: QR passes ----------
+async function viewPasses(main) {
+  const subs = (await api('/subscriptions?limit=200')).items.filter(s => ['active', 'paused', 'closed', 'confirmed'].includes(s.status));
+  const passes = await Promise.all(subs.map(s => api(`/subscriptions/${s.id}/pass`)));
+  const tone = { valid: 'linear-gradient(150deg,#8d5d80,#4a2f43 70%,#2a1826)', paused: 'linear-gradient(150deg,#b7893a,#5c4413)',
+    pending: 'linear-gradient(150deg,#6b6f76,#2a2c30)', invalid: 'linear-gradient(150deg,#6b6f76,#2a2c30)' };
+  main.innerHTML = pageHeader('Subscription passes', 'Show the QR code to prove your subscription is active. Scanning it opens a live check, with no prices or personal details.', '', 'Customer window · QR pass') + `
+    <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-3">${passes.map(p => `
+      <div class="overflow-hidden rounded-3xl text-white shadow-xl" style="background:${tone[p.state]}">
+        <div class="flex items-center justify-between px-6 pt-5"><span class="text-lg font-bold tracking-tight">brightloop<span class="opacity-60">.</span></span>
+          <span class="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold">${esc(p.label)}</span></div>
+        <div class="px-6 pt-4"><div class="text-xs uppercase tracking-widest text-white/60">Subscription pass</div>
+          <div class="mt-1 text-2xl font-semibold leading-tight">${esc(p.plan)}</div>
+          <div class="mt-1 text-sm text-white/75">${esc(p.holder)}</div></div>
+        <div class="grid grid-cols-3 gap-2 px-6 pt-4 text-xs">
+          <div><div class="text-white/55 uppercase tracking-wider">Pass</div><div class="font-semibold">${p.subscription_number}</div></div>
+          <div><div class="text-white/55 uppercase tracking-wider">Since</div><div class="font-semibold">${fmtDate(p.since)}</div></div>
+          <div><div class="text-white/55 uppercase tracking-wider">${p.rolling ? 'Renews' : p.state === 'invalid' ? 'Ended' : 'Valid to'}</div><div class="font-semibold">${fmtDate(p.valid_through)}</div></div></div>
+        ${p.price_locked_until ? `<div class="mx-6 mt-3 rounded-lg bg-white/10 px-3 py-1.5 text-xs">${icon('lock', 'h-3 w-3 inline')} Price locked until ${fmtDate(p.price_locked_until)}</div>` : ''}
+        <div class="relative mx-6 my-5 border-t border-dashed border-white/30"></div>
+        <div class="flex items-center gap-4 px-6 pb-6">
+          <div class="qr shrink-0 rounded-xl bg-white p-2" style="width:132px;height:132px">${p.qr_svg}</div>
+          <div class="min-w-0 space-y-2 text-sm">
+            <a class="flex items-center gap-1.5 text-white/90 hover:text-white" href="${p.verify_url}" target="_blank" rel="noopener">${icon('external-link', 'h-4 w-4')} Open check page</a>
+            <button class="flex items-center gap-1.5 text-white/90 hover:text-white" data-dl="${p.subscription_id}">${icon('download', 'h-4 w-4')} Download QR</button>
+            <button class="flex items-center gap-1.5 text-white/90 hover:text-white" data-reissue="${p.subscription_id}">${icon('refresh-cw', 'h-4 w-4')} Reissue pass</button>
+            <div class="text-[11px] text-white/50">v${p.version} · reissuing cancels older codes</div></div></div>
+      </div>`).join('') || '<div class="card p-10 text-center text-slate-400 md:col-span-3">No subscriptions with a pass yet.</div>'}</div>`;
+  $$('.qr svg', main).forEach(svg => { svg.setAttribute('width', '100%'); svg.setAttribute('height', '100%'); });
+  $$('[data-dl]', main).forEach(b => b.addEventListener('click', () => {
+    const p = passes.find(x => x.subscription_id == b.dataset.dl);
+    const url = URL.createObjectURL(new Blob([p.qr_svg], { type: 'image/svg+xml' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: `${p.subscription_number}-pass.svg` });
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }));
+  $$('[data-reissue]', main).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Reissue this pass? The old QR code will stop working.')) return;
+    await run(() => api(`/subscriptions/${b.dataset.reissue}/pass/regenerate`, { method: 'POST' }), 'New pass issued; the old code no longer verifies');
+    refresh();
+  }));
+}
+
+// ---------- admin: price changes ----------
+async function priceChangesCard(products) {
+  const changes = await api('/price-changes');
+  if (!$('#pc-card')) return;
+  $('#pc-card').innerHTML = !changes.length ? '' : `<div class="card mb-6 overflow-hidden">
+    <div class="card-head"><div class="t">${icon('megaphone')} Price changes</div><div class="s">customers are notified and see them in their Price Guardian</div></div>
+    <div class="overflow-x-auto"><table class="tbl"><thead><tr><th>Product</th><th class="num">Old</th><th class="num">New</th><th>Effective</th><th>Customers</th><th>Status</th><th></th></tr></thead><tbody>
+    ${changes.map(c => `<tr><td class="font-medium">${esc(c.product_name)}${c.note ? `<div class="text-xs text-slate-500">${esc(c.note)}</div>` : ''}</td>
+      <td class="num">${money(c.old_price)}</td><td class="num font-semibold">${money(c.new_price)}</td><td>${fmtDate(c.effective_on)}</td>
+      <td>${c.subscriptions} subscription${c.subscriptions === 1 ? '' : 's'}${c.deferred ? ` · <span class="text-teal">${c.deferred} locked</span>` : ''}</td>
+      <td>${badge(c.status === 'scheduled' ? 'quotation' : c.status === 'applied' ? 'active' : 'closed', c.status)}</td>
+      <td class="text-right">${c.status === 'scheduled' && isAdmin() ? `<button class="btn btn-danger btn-sm" data-pc-cancel="${c.id}">Cancel</button>` : ''}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+  $$('[data-pc-cancel]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Withdraw this price change? Affected customers keep their current price.')) return;
+    await run(() => api(`/price-changes/${b.dataset.pcCancel}/cancel`, { method: 'POST' }), 'Price change cancelled'); refresh();
+  }));
+}
+function priceChangeDialog(p) {
+  const d = new Date(); d.setDate(d.getDate() + 30);
+  formModal(`Schedule a price change · ${p.name}`, [
+    { name: 'new_price', label: `New price (now ${money(p.sales_price)})`, type: 'number', step: '0.01', min: 0, required: true },
+    { name: 'effective_on', label: 'Effective from', type: 'date', required: true, value: d.toISOString().slice(0, 10), help: '30 days\' notice is the default.' },
+    { name: 'note', label: 'Reason shown to customers', span: 'sm:col-span-2', placeholder: 'e.g. Annual list price review' },
+  ], async v => {
+    const r = await api('/price-changes', { method: 'POST', body: { product_id: p.id, ...v } });
+    toast(`Scheduled. ${r.subscriptions} subscription${r.subscriptions === 1 ? '' : 's'} notified${r.deferred ? `, ${r.deferred} protected by a Renewal Lock` : ''}`);
+    invalidate('products'); refresh();
+  }, { submitLabel: 'Schedule and notify customers',
+       extraHtml: '<p class="mt-4 text-sm text-slate-500">Existing subscribers are emailed now and move to the new price on the effective date (negotiated prices change by the same percentage). Subscriptions with a Renewal Lock keep their price until the lock ends.</p>' });
+}
+
 // ---------- customer portal ----------
 async function viewMySubscriptions(main) {
   const data = await api('/subscriptions?limit=200');
@@ -1609,7 +1816,8 @@ async function viewMySubscriptions(main) {
     '<a href="#/subscribe" class="btn btn-primary">+ Subscribe to a plan</a>') +
     `<div class="grid lg:grid-cols-2 gap-4">${data.items.map(s => `<div class="card p-5" data-sid="${s.id}">
       <div class="flex justify-between items-start gap-3"><div><div class="text-xs text-gray-500">${s.subscription_number}</div>
-        <h3 class="font-semibold text-lg">${esc(s.plan_name)}</h3></div>${badge(s.status)}</div>
+        <h3 class="font-semibold text-lg">${esc(s.plan_name)}</h3></div><div class="flex flex-wrap justify-end gap-1">${badge(s.status)}
+        ${s.price_lock_until && s.price_lock_until >= today() ? `<span class="badge b-green">${icon('lock', 'h-3 w-3')} Locked to ${fmtDate(s.price_lock_until)}</span>` : ''}</div></div>
       <div class="text-2xl font-semibold mt-2">${money(s.recurring_amount)}<span class="text-sm text-gray-500 font-normal"> + tax / ${FREQ[s.billing_frequency]}</span></div>
       <div class="grid grid-cols-3 gap-2 text-sm mt-3">
         <div><div class="label">Started</div>${fmtDate(s.start_date)}</div><div><div class="label">Expires</div>${fmtDate(s.expiry_date)}</div>
@@ -1617,6 +1825,8 @@ async function viewMySubscriptions(main) {
       ${s.status === 'paused' ? `<div class="mt-3">${pauseBanner(s)}</div>` : ''}
       <div class="lines text-sm mt-3 text-gray-600"></div>
       <div class="flex flex-wrap gap-2 mt-4">${subActions(s)}
+        <a class="btn btn-ghost" href="#/passes">${icon('qr-code')} QR pass</a>
+        ${['active', 'paused'].includes(s.status) && !(s.price_lock_until && s.price_lock_until >= today()) ? `<a class="btn btn-ghost" href="#/guardian">${icon('lock')} Lock price</a>` : ''}
         <button class="btn btn-ghost" data-bb="${s.id}">${icon('box')} Billing record</button></div></div>`).join('')
       || '<div class="card p-10 text-center text-gray-400 lg:col-span-2">You have no subscriptions yet. <a class="text-odoo" href="#/subscribe">Browse plans →</a></div>'}</div>`;
   for (const s of data.items) {

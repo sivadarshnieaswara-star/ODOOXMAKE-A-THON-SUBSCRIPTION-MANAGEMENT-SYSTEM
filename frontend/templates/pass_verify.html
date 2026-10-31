@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brightloop pass check</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; box-sizing: border-box;
+         background: linear-gradient(160deg, #2a1826, #17121a); font: 15px/1.5 Inter, system-ui, sans-serif; color: #17181a; }
+  .card { width: 100%; max-width: 380px; background: #fff; border-radius: 22px; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,.45); }
+  .top { padding: 28px 24px; text-align: center; color: #fff; }
+  .valid { background: linear-gradient(145deg, #12969c, #017E84); }
+  .paused, .pending { background: linear-gradient(145deg, #f6c56b, #eda100); color: #2a1a00; }
+  .invalid { background: linear-gradient(145deg, #f0567a, #e11d48); }
+  .mark { width: 64px; height: 64px; border-radius: 50%; margin: 0 auto 10px; display: grid; place-items: center; font-size: 34px;
+          font-weight: 700; background: rgba(255,255,255,.22); }
+  h1 { margin: 0; font-size: 24px; }
+  .body { padding: 18px 24px 24px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f0eeee; }
+  .row span:first-child { color: #6b6f76; }
+  .row span:last-child { font-weight: 600; text-align: right; }
+  .foot { margin-top: 14px; font-size: 12px; color: #6b6f76; text-align: center; }
+  .brand { font-weight: 700; color: #714B67; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="top {{ r.state }}">
+    <div class="mark">{{ '✓' if r.state == 'valid' else '!' if r.state in ('paused', 'pending') else '✕' }}</div>
+    <h1>{{ 'Valid subscription' if r.state == 'valid' else r.label }}</h1>
+    {% if r.message %}<div>{{ r.message }}</div>{% endif %}
+  </div>
+  <div class="body">
+    {% if r.holder %}
+    <div class="row"><span>Holder</span><span>{{ r.holder }}</span></div>
+    <div class="row"><span>Plan</span><span>{{ r.plan }}</span></div>
+    <div class="row"><span>Pass</span><span>{{ r.subscription_number }}</span></div>
+    <div class="row"><span>Member since</span><span>{{ r.since.strftime('%d %b %Y') }}</span></div>
+    <div class="row"><span>{{ 'Renews' if r.rolling else 'Valid through' if r.state != 'invalid' else 'Ended' }}</span>
+      <span>{{ r.valid_through.strftime('%d %b %Y') if r.valid_through else '—' }}</span></div>
+    {% endif %}
+    <div class="foot">Checked {{ r.checked_at.strftime('%d %b %Y, %H:%M') }} UTC · <span class="brand">brightloop.</span> pass verification</div>
+  </div>
+</div>
+</body>
+</html>

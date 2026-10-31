@@ -243,6 +243,8 @@ class SubscriptionOut(ORM):
     resume_on: date | None = None
     pause_reason: str | None = None
     max_pause_days: int | None = None
+    price_lock_until: date | None = None
+    price_locked_at: date | None = None
     last_billing_date: date | None
     next_billing_date: date | None
     notes: str | None

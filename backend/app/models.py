@@ -159,6 +159,9 @@ class Subscription(Base):
     paused_at: Mapped[date | None] = mapped_column(Date)
     resume_on: Mapped[date | None] = mapped_column(Date, index=True)  # automatic resume date while paused
     pause_reason: Mapped[str | None] = mapped_column(String(255))
+    price_lock_until: Mapped[date | None] = mapped_column(Date)   # Renewal Lock: prices frozen (and no early exit) until this date
+    price_locked_at: Mapped[date | None] = mapped_column(Date)
+    pass_version: Mapped[int | None] = mapped_column(Integer)     # bumping it revokes previously issued QR passes
 
     customer: Mapped[User] = relationship()
     plan: Mapped[Plan] = relationship()
@@ -297,6 +300,41 @@ class Payment(Base):
 
     invoice: Mapped[Invoice] = relationship(back_populates="payments")
     customer: Mapped[User] = relationship()
+
+
+class PriceChange(Base):
+    """A scheduled catalog price change. Existing subscribers get notice and the new price from effective_on."""
+    __tablename__ = "price_changes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    old_price: Mapped[float] = mapped_column(Float)
+    new_price: Mapped[float] = mapped_column(Float)
+    announced_on: Mapped[date] = mapped_column(Date)
+    effective_on: Mapped[date] = mapped_column(Date, index=True)
+    note: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(20), default="scheduled")  # scheduled | applied | cancelled
+    created_by: Mapped[str | None] = mapped_column(String(255))
+
+    product: Mapped[Product] = relationship()
+    notices: Mapped[list["PriceNotice"]] = relationship(back_populates="change", cascade="all, delete-orphan")
+
+
+class PriceNotice(Base):
+    """One subscription line affected by a price change: the customer-facing notice and its own effective date."""
+    __tablename__ = "price_notices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    price_change_id: Mapped[int] = mapped_column(ForeignKey("price_changes.id"), index=True)
+    subscription_id: Mapped[int] = mapped_column(ForeignKey("subscriptions.id"), index=True)
+    line_id: Mapped[int] = mapped_column(ForeignKey("subscription_lines.id"))
+    old_unit: Mapped[float] = mapped_column(Float)
+    new_unit: Mapped[float] = mapped_column(Float)
+    quantity: Mapped[int] = mapped_column(Integer)
+    effective_on: Mapped[date] = mapped_column(Date, index=True)   # later than the change itself if a Renewal Lock defers it
+    status: Mapped[str] = mapped_column(String(20), default="scheduled")  # scheduled | applied | cancelled
+
+    change: Mapped[PriceChange] = relationship(back_populates="notices")
+    subscription: Mapped[Subscription] = relationship()
+    line: Mapped[SubscriptionLine] = relationship()
 
 
 class BlackBoxEntry(Base):

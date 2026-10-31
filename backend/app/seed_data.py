@@ -169,3 +169,8 @@ def seed_demo(db: Session, today: date | None = None) -> None:
             amount, acme_partial_done = round(inv.balance_due / 2, 2), True
         record_payment(db, inv, amount, methods[n % len(methods)], paid_on, "Seeded demo payment", admin)
     db.commit()
+
+    # An announced price rise, so the Price Change Guardian has something to show.
+    from .services.customer_features import schedule_price_change
+    schedule_price_change(db, crm, 49, today + timedelta(days=30), "Annual list price review", admin, today=today)
+    db.commit()

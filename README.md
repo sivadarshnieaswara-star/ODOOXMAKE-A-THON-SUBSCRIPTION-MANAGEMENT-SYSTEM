@@ -10,7 +10,7 @@ Built with FastAPI + SQLAlchemy + SQLite on the backend and plain JS + Tailwind 
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install fastapi "uvicorn[standard]" sqlalchemy pydantic email-validator python-dateutil pyjwt jinja2 httpx pytest
+.venv/bin/pip install fastapi "uvicorn[standard]" sqlalchemy pydantic email-validator python-dateutil pyjwt jinja2 qrcode httpx pytest
 .venv/bin/python run.py
 ```
 
@@ -107,6 +107,24 @@ seal, lifetime figures, a billed-vs-collected chart, an incidents list and the f
 export is available too. Customers can download a copy for their own subscriptions (internal notes
 left out). Subscriptions that existed before the recorder get their history rebuilt from existing
 records on startup, marked as reconstructed.
+
+**Customer window** - four things customers get in their portal:
+
+- *Personal timeline*: everything that has happened on their subscriptions (from the black box,
+  customer copy) and what's coming in the next six months: invoice dates with estimated amounts,
+  contract ends, scheduled resumes, quote deadlines, price changes and when a Renewal Lock ends.
+- *Price Change Guardian*: when the admin schedules a price change (Products → Price change, 30 days'
+  notice by default), every affected subscriber is emailed and it lands in their black box. The
+  Guardian page shows each change with its $ impact per month and year, the effective date, a
+  forecast of the next invoice against the last one, and a watch list (discounts ending, billing
+  restarting after a pause, a lock about to end). The billing run applies the new price on the day;
+  negotiated prices move by the same percentage.
+- *Renewal Lock*: lock today's price through the next renewal (12 months, or the next term on a
+  fixed contract). Scheduled increases skip locked subscriptions until the lock ends. In return the
+  customer can't cancel early while locked. Staff can release a lock.
+- *QR pass*: a wallet-style pass per subscription with a signed QR code. Scanning it opens a public
+  check page (valid / paused / ended, holder, plan, renewal date, no prices or contact details).
+  Codes can't be forged, and reissuing a pass revokes the old code.
 
 ## Folder structure
 

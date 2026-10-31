@@ -56,6 +56,18 @@ def seed_demo(db: Session, today: date | None = None) -> None:
     umbrella = _user(db, "ops@umbrella.io", "CustomerPass#2026", "customer", "Alice Abernathy", "Umbrella Labs",
                      "+91 98400 55555")
 
+    # Full profiles for the demo customers.
+    for u, extra in [
+        (acme, dict(job_title="Head of Finance", billing_email="ap@corp.com", website="https://acme.example", industry="Manufacturing",
+                    company_size="201-1000", tax_id="33AABCA1234F1Z5", address_line1="12 Industrial Estate Road", address_line2="Guindy",
+                    city="Chennai", state="Tamil Nadu", postal_code="600032", country="India", preferred_payment_method="bank_transfer")),
+        (retail, dict(job_title="Owner", industry="Retail", company_size="1-10", tax_id="29AAGCR5678K1Z2",
+                      address_line1="45 MG Road", city="Bengaluru", state="Karnataka", postal_code="560001", country="India",
+                      preferred_payment_method="upi")),
+    ]:
+        for k, v in extra.items():
+            setattr(u, k, v)
+
     gst = TaxRule(name="GST 18%", rate_percentage=18.0, is_default=True)
     reduced = TaxRule(name="Reduced GST 5%", rate_percentage=5.0)
     db.add_all([gst, reduced])

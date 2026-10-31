@@ -39,10 +39,35 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(120))
     company_name: Mapped[str | None] = mapped_column(String(160))
     phone: Mapped[str | None] = mapped_column(String(40))
+    # Customer profile
+    job_title: Mapped[str | None] = mapped_column(String(120))
+    billing_email: Mapped[str | None] = mapped_column(String(255))   # invoices go here when set
+    website: Mapped[str | None] = mapped_column(String(255))
+    industry: Mapped[str | None] = mapped_column(String(80))
+    company_size: Mapped[str | None] = mapped_column(String(20))
+    tax_id: Mapped[str | None] = mapped_column(String(30))           # GSTIN / VAT number
+    address_line1: Mapped[str | None] = mapped_column(String(200))
+    address_line2: Mapped[str | None] = mapped_column(String(200))
+    city: Mapped[str | None] = mapped_column(String(100))
+    state: Mapped[str | None] = mapped_column(String(100))
+    postal_code: Mapped[str | None] = mapped_column(String(20))
+    country: Mapped[str | None] = mapped_column(String(80))
+    preferred_payment_method: Mapped[str | None] = mapped_column(String(20))
+    notify_offers: Mapped[bool | None] = mapped_column(Boolean, default=True)  # offers & product news (billing mail always goes)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     reset_token_hash: Mapped[str | None] = mapped_column(String(128))
     reset_token_expiry: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    @property
+    def billing_to(self) -> str:
+        """Where invoices, receipts and reminders are sent."""
+        return self.billing_email or self.email
+
+    @property
+    def address_lines(self) -> list[str]:
+        city = " ".join(x for x in (self.city, self.postal_code) if x)
+        return [x for x in (self.address_line1, self.address_line2, ", ".join(x for x in (city, self.state) if x), self.country) if x]
 
 
 class TaxRule(Base):

@@ -20,6 +20,12 @@ def my_timeline(months: int = 6, user: User = Depends(require_customer), db: Ses
     return cf.timeline(db, user, horizon_months=max(1, min(months, 24)))
 
 
+@router.get("/portal/account")
+def my_account(user: User = Depends(require_customer), db: Session = Depends(get_db)):
+    """Header numbers for the customer's profile page."""
+    return cf.account_summary(db, user)
+
+
 @router.get("/portal/guardian")
 def my_guardian(user: User = Depends(require_customer), db: Session = Depends(get_db)):
     return cf.guardian(db, user)

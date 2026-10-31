@@ -38,7 +38,8 @@
       <span class="status s-{{ inv.status }}">{{ inv.status }}</span>{% if inv.is_overdue %} <span class="status s-cancelled">overdue</span>{% endif %}</div></div>
   </div>
   <div class="meta">
-    <div><b>Billed to</b>{{ inv.customer_name }}<br><span class="muted">{{ inv.customer_email }}</span></div>
+    <div><b>Billed to</b>{{ inv.customer_name }}<br>{% for line in inv.customer_address %}<span class="muted">{{ line }}</span><br>{% endfor %}
+      {% if inv.customer_tax_id %}<span class="muted">GSTIN / Tax ID: {{ inv.customer_tax_id }}</span><br>{% endif %}<span class="muted">{{ inv.customer_email }}</span></div>
     <div><b>Subscription</b>{{ inv.subscription_number }}<br><span class="muted">{{ inv.period_start.strftime('%d %b %Y') }} – {{ inv.period_end.strftime('%d %b %Y') }}</span></div>
     <div><b>Issued</b>{{ inv.issue_date.strftime('%d %b %Y') }}<br><b style="margin-top:8px">Due</b>{{ inv.due_date.strftime('%d %b %Y') }}</div>
   </div>

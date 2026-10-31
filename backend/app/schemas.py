@@ -47,6 +47,11 @@ class ChangePasswordIn(BaseModel):
     new_password: str
 
 
+PROFILE_FIELDS = ("name", "company_name", "phone", "job_title", "billing_email", "website", "industry", "company_size",
+                  "tax_id", "address_line1", "address_line2", "city", "state", "postal_code", "country",
+                  "preferred_payment_method", "notify_offers")
+
+
 class UserOut(ORM):
     id: int
     email: str
@@ -56,6 +61,20 @@ class UserOut(ORM):
     phone: str | None
     is_active: bool
     created_at: datetime
+    job_title: str | None = None
+    billing_email: str | None = None
+    website: str | None = None
+    industry: str | None = None
+    company_size: str | None = None
+    tax_id: str | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city: str | None = None
+    state: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    preferred_payment_method: str | None = None
+    notify_offers: bool | None = True
 
 
 class TokenOut(BaseModel):
@@ -69,10 +88,52 @@ class StaffIn(RegisterIn):
 
 
 class UserUpdate(BaseModel):
-    name: str | None = None
-    company_name: str | None = None
-    phone: str | None = None
+    """Partial update: only the fields sent are changed, and sending null clears a field."""
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    company_name: str | None = Field(default=None, max_length=160)
+    phone: str | None = Field(default=None, max_length=40)
     is_active: bool | None = None
+    job_title: str | None = Field(default=None, max_length=120)
+    billing_email: EmailStr | None = None
+    website: str | None = Field(default=None, max_length=255)
+    industry: str | None = Field(default=None, max_length=80)
+    company_size: Literal["1-10", "11-50", "51-200", "201-1000", "1000+"] | None = None
+    tax_id: str | None = Field(default=None, max_length=30)
+    address_line1: str | None = Field(default=None, max_length=200)
+    address_line2: str | None = Field(default=None, max_length=200)
+    city: str | None = Field(default=None, max_length=100)
+    state: str | None = Field(default=None, max_length=100)
+    postal_code: str | None = Field(default=None, max_length=20)
+    country: str | None = Field(default=None, max_length=80)
+    preferred_payment_method: PaymentMethod | None = None
+    notify_offers: bool | None = None
+
+    @field_validator("tax_id")
+    @classmethod
+    def clean_tax_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().upper().replace(" ", "")
+        if not v.isalnum():
+            raise ValueError("Tax ID can only contain letters and numbers")
+        if len(v) == 15 and not (v[:2].isdigit() and v[2:7].isalpha()):
+            raise ValueError("That doesn't look like a valid GSTIN (e.g. 33ABCDE1234F1Z5)")
+        return v
+
+    @field_validator("website")
+    @classmethod
+    def clean_website(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if v and "." not in v:
+            raise ValueError("Enter a website like example.com")
+        return v if v.startswith(("http://", "https://")) else f"https://{v}"
+
+    @field_validator("billing_email")
+    @classmethod
+    def lower_billing_email(cls, v):
+        return v.lower() if v else v
 
 
 # ---------- Taxes ----------
@@ -328,6 +389,8 @@ class InvoiceOut(ORM):
     subscription_number: str
     customer_id: int
     customer_name: str
+    customer_address: list[str] = []
+    customer_tax_id: str | None = None
     customer_email: str
     period_start: date
     period_end: date

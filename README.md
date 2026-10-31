@@ -9,7 +9,7 @@ a revenue forecast, a recommendations engine, a tamper-proof billing record for 
 and a proper customer portal (timeline, price-change alerts, price lock and a QR pass).
 
 **Stack:** FastAPI + SQLAlchemy + SQLite on the backend, plain JavaScript + Tailwind on the frontend
-(no build step). 85 automated tests.
+(no build step). 91 automated tests.
 
 ---
 
@@ -154,6 +154,13 @@ copy (internal notes left out).
   (valid / paused / ended) with no prices or contact details. Codes are signed so they can't be
   forged, and reissuing a pass revokes the old one.
 
+**Customer profile.** Customers keep a full record: contact details (job title, phone, a separate
+billing email), company (industry, size, website, GSTIN / tax ID) and billing address, plus a
+preferred payment method and an opt-out for offers. Billing emails (invoices, reminders, price
+notices) always go out, to the billing email when one is set; the printed invoice shows the
+address and GSTIN. The profile header shows the customer ID, how complete the profile is, and
+spend, payments and outstanding balance. Staff can view and edit the same details.
+
 **Look and feel.** An intro screen (press any key or click to continue), a login page with an animated
 perspective grid, an ombre purple sidebar for the internal team, and dark mode (follows your OS until
 you pick one with the sun/moon button).
@@ -182,7 +189,7 @@ backend/app/
     blackbox               hash-chained event recorder and report data
     customer_features      timeline, price changes, renewal lock, QR pass
   routers/                 API endpoints
-backend/tests/             85 tests (per brief phase, plus one file per extra)
+backend/tests/             91 tests (per brief phase, plus one file per extra)
 frontend/
   templates/               index.html (the app), invoice print, black box report, pass check page
   static/                  app.js, styles.css

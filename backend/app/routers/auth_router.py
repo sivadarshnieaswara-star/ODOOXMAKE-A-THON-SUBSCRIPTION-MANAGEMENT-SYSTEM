@@ -12,7 +12,7 @@ from ..config import APP_BASE_URL, RESET_TOKEN_MINUTES
 from ..database import get_db
 from ..models import User
 from ..schemas import (
-    ChangePasswordIn, ForgotPasswordIn, LoginIn, RegisterIn, ResetPasswordIn, TokenOut, UserOut, UserUpdate,
+    PROFILE_FIELDS, ChangePasswordIn, ForgotPasswordIn, LoginIn, RegisterIn, ResetPasswordIn, TokenOut, UserOut, UserUpdate,
 )
 from ..services.common import send_email
 
@@ -61,9 +61,11 @@ def me(user: User = Depends(get_current_user)):
 
 @router.patch("/me", response_model=UserOut)
 def update_me(data: UserUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    for field in ("name", "company_name", "phone"):
-        if getattr(data, field) is not None:
-            setattr(user, field, getattr(data, field))
+    for field in data.model_fields_set & set(PROFILE_FIELDS):
+        value = getattr(data, field)
+        if field == "name" and not value:
+            raise HTTPException(400, "Name can't be empty")
+        setattr(user, field, value)
     db.commit()
     return user
 

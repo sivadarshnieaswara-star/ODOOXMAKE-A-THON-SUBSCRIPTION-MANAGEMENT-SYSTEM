@@ -178,8 +178,8 @@ def send_invoice(db: Session, inv: Invoice) -> Invoice:
             f"Subtotal: {inv.subtotal:,.2f}\nDiscount: -{inv.discount_amount:,.2f}\nTax: {inv.tax_amount:,.2f}\n"
             f"Total: {inv.total_amount:,.2f}\nBalance due: {inv.balance_due:,.2f} by {inv.due_date}\n\n"
             "You can view and pay it in your Brightloop customer portal.\n\nBrightloop Software")
-    send_email(db, customer.email, f"Invoice {inv.invoice_number} from Brightloop Software", body)
+    send_email(db, customer.billing_to, f"Invoice {inv.invoice_number} from Brightloop Software", body)
     inv.sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    blackbox.record(inv.subscription, "invoice_sent", f"Invoice {inv.invoice_number} emailed to {customer.email}",
-                    data={"invoice": inv.invoice_number, "to": customer.email})
+    blackbox.record(inv.subscription, "invoice_sent", f"Invoice {inv.invoice_number} emailed to {customer.billing_to}",
+                    data={"invoice": inv.invoice_number, "to": customer.billing_to})
     return inv

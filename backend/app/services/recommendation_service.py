@@ -212,12 +212,16 @@ def build(db: Session, today: date | None = None) -> list[dict]:
 
 
 # ---------- actions ----------
-def _email_subs(db: Session, ids: list[int], subject: str, body, actor: User | None = None) -> int:
+def _email_subs(db: Session, ids: list[int], subject: str, body, actor: User | None = None, offer: bool = False) -> int:
+    """Email each subscription's customer. Offers respect the customer's opt-out; service emails always go."""
     n = 0
     for sub in db.scalars(select(Subscription).where(Subscription.id.in_(ids))).all():
+        if offer and sub.customer.notify_offers is False:
+            continue
         text = subject.format(sub=sub)
-        send_email(db, sub.customer.email, text, body(sub))
-        blackbox.record(sub, "outreach_sent", f"Email sent: {text}", actor=actor, data={"to": sub.customer.email}, internal=True)
+        to = sub.customer.billing_to if not offer else sub.customer.email
+        send_email(db, to, text, body(sub))
+        blackbox.record(sub, "outreach_sent", f"Email sent: {text}", actor=actor, data={"to": to}, internal=True)
         n += 1
     return n
 
@@ -234,8 +238,8 @@ def execute(db: Session, rec_key: str, actor: User, autopilot: bool = False, tod
         for inv in db.scalars(select(Invoice).where(Invoice.id.in_(a["ids"]), Invoice.status == "confirmed")).all():
             blackbox.record(inv.subscription, "reminder_sent", f"Payment reminder sent for {inv.invoice_number} "
                             f"({(today - inv.due_date).days} days overdue)", actor=actor, amount=inv.balance_due,
-                            data={"invoice": inv.invoice_number, "to": inv.customer.email}, internal=True)
-            send_email(db, inv.customer.email, f"Reminder: invoice {inv.invoice_number} is overdue",
+                            data={"invoice": inv.invoice_number, "to": inv.customer.billing_to}, internal=True)
+            send_email(db, inv.customer.billing_to, f"Reminder: invoice {inv.invoice_number} is overdue",
                        f"Hello {inv.customer.name},\n\nInvoice {inv.invoice_number} for {inv.balance_due:,.2f} was due on {inv.due_date} "
                        f"and is now {(today - inv.due_date).days} days overdue. You can pay it in your Brightloop customer portal.\n\n"
                        "If you've already paid, please ignore this message.\n\nBrightloop Software")
@@ -264,13 +268,13 @@ def execute(db: Session, rec_key: str, actor: User, autopilot: bool = False, tod
         n = _email_subs(db, a["ids"], "Save with annual billing on {sub.subscription_number}",
                         lambda s: f"Hello {s.customer.name},\n\nThanks for being with us. Switching {s.subscription_number} to annual billing "
                                   f"would cost {s.recurring_amount * 10:,.2f} a year instead of {s.recurring_amount * 12:,.2f}: two months free. "
-                                  "Reply to this email and we'll set it up.\n\nBrightloop Software", actor)
+                                  "Reply to this email and we'll set it up.\n\nBrightloop Software", actor, offer=True)
         summary = f"Sent {n} annual-plan offer{'s' if n != 1 else ''}"
     elif kind == "send_upsell_offers":
         product = db.get(Product, a["product_id"])
         n = _email_subs(db, a["ids"], f"{product.name} for your team",
                         lambda s: f"Hello {s.customer.name},\n\nTeams your size get a lot out of {product.name}. It's {product.sales_price:,.2f} "
-                                  f"a month on {s.subscription_number}. Reply to this email and we'll add it.\n\nBrightloop Software", actor)
+                                  f"a month on {s.subscription_number}. Reply to this email and we'll add it.\n\nBrightloop Software", actor, offer=True)
         summary = f"Sent {n} {product.name} offer{'s' if n != 1 else ''}"
     elif kind == "send_quote_followups":
         n = _email_subs(db, a["ids"], "Your Brightloop quotation {sub.subscription_number} expires soon",

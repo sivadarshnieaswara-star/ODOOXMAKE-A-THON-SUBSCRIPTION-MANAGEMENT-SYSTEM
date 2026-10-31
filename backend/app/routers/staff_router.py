@@ -54,7 +54,10 @@ def update_user(user_id: int, data: UserUpdate, actor: User = Depends(require_st
         raise HTTPException(403, "Only the admin can change staff accounts")
     if target.id == actor.id and data.is_active is False:
         raise HTTPException(400, "You cannot disable your own account")
-    for field, value in data.model_dump(exclude_none=True).items():
+    for field in data.model_fields_set:
+        value = getattr(data, field)
+        if field in ("name", "is_active") and value is None:
+            continue
         setattr(target, field, value)
     db.commit()
     return target

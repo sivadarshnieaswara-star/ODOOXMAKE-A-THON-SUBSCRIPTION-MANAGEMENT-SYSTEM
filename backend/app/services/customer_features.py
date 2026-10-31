@@ -120,7 +120,7 @@ def schedule_price_change(db: Session, product: Product, new_price: float, effec
                         f"from {when}" + (" (deferred by your Renewal Lock)" if locked else ""),
                         actor=actor, on=today, amount=delta, data={"product": product.name, "effective_on": when, "delta_per_period": delta,
                                                                     "deferred_by_lock": locked})
-        send_email(db, sub.customer.email, f"Price update for {product.name} on {sub.subscription_number}",
+        send_email(db, sub.customer.billing_to, f"Price update for {product.name} on {sub.subscription_number}",
                    f"Hello {sub.customer.name},\n\n{product.name} will change from {notices[0].old_unit:,.2f} to {notices[0].new_unit:,.2f} "
                    f"per unit on {sub.subscription_number}, effective {when}. That's {delta:+,.2f} per {PERIOD[sub.plan.billing_frequency]} "
                    f"at your current quantity.\n\n" + ("Your Renewal Lock protects you until then.\n\n" if locked else
@@ -399,3 +399,26 @@ def verify_pass(db: Session, token: str, today: date | None = None) -> dict:
     st = pass_status(sub, today)
     return {"ok": st["state"] == "valid", "message": None, "checked_at": checked, "subscription_number": sub.subscription_number,
             "holder": sub.customer.company_name or sub.customer.name, "plan": sub.plan.name, "since": sub.start_date, **st}
+
+
+# ---------- account summary (profile page) ----------
+def account_summary(db: Session, customer: User) -> dict:
+    from ..models import Payment
+    subs = _customer_subs(db, customer)
+    invoices = list(db.scalars(select(Invoice).where(Invoice.customer_id == customer.id, Invoice.status.in_(("confirmed", "paid")))))
+    payments = list(db.scalars(select(Payment).where(Payment.customer_id == customer.id).order_by(Payment.payment_date.desc())))
+    today = _today()
+    filled = sum(1 for f in ("phone", "job_title", "billing_email", "industry", "company_size", "tax_id", "address_line1",
+                             "city", "state", "postal_code", "country", "preferred_payment_method") if getattr(customer, f))
+    return {
+        "customer_id": f"CUST-{customer.id:05d}", "member_since": customer.created_at.date(),
+        "subscriptions": len(subs), "active": sum(1 for s in subs if s.status == "active"),
+        "paused": sum(1 for s in subs if s.status == "paused"),
+        "monthly_spend": round(sum(s.recurring_amount * MONTHLY_FACTOR[s.plan.billing_frequency] for s in subs if s.status == "active"), 2),
+        "lifetime_billed": round(sum(i.total_amount for i in invoices), 2),
+        "lifetime_paid": round(sum(p.amount for p in payments), 2),
+        "outstanding": round(sum(i.balance_due for i in invoices if i.status == "confirmed"), 2),
+        "overdue": round(sum(i.balance_due for i in invoices if i.status == "confirmed" and i.due_date < today), 2),
+        "last_payment": {"amount": payments[0].amount, "date": payments[0].payment_date, "method": payments[0].payment_method} if payments else None,
+        "profile_complete": round(filled / 12 * 100),
+    }

@@ -145,7 +145,7 @@ function field(f) {
     input = `<textarea class="input" rows="2" name="${f.name}">${esc(v)}</textarea>`;
   } else {
     input = `<input class="input" type="${f.type || 'text'}" name="${f.name}" value="${esc(v)}" ${req}
-      ${f.step ? `step="${f.step}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ''}>`;
+      ${f.step ? `step="${f.step}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ''} ${f.list ? `list="${f.list}"` : ''}>`;
   }
   return `<div class="${f.span || ''}"><label class="label">${esc(f.label)}${f.required ? ' *' : ''}</label>${input}
     ${f.help ? `<p class="text-xs text-gray-500 mt-1">${esc(f.help)}</p>` : ''}</div>`;
@@ -1415,10 +1415,10 @@ function paymentsTable(data, showCustomer) {
 async function viewCustomers(main) {
   const customers = await getCustomers(true);
   main.innerHTML = pageHeader('Customers', `${customers.length} customer accounts`, '<button class="btn btn-primary" id="new-cust">+ New customer</button>') + `
-    <div class="card overflow-x-auto"><table class="tbl"><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Since</th><th></th></tr></thead><tbody>
+    <div class="card overflow-x-auto"><table class="tbl"><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Location</th><th>GSTIN</th><th>Since</th><th></th></tr></thead><tbody>
     ${customers.map(c => `<tr><td class="font-medium">${esc(c.company_name || '—')}</td><td>${esc(c.name)}</td><td>${esc(c.email)}</td><td>${esc(c.phone || '')}</td>
-      <td>${fmtDate(c.created_at)}</td><td class="text-right whitespace-nowrap"><button class="btn btn-light btn-sm" data-subs="${c.id}">Subscriptions</button>
-      <button class="btn btn-light btn-sm" data-ed="${c.id}">Edit</button></td></tr>`).join('') || emptyRow(6)}</tbody></table></div>`;
+      <td>${esc([c.city, c.state].filter(Boolean).join(', ') || '—')}</td><td class="font-mono text-xs">${esc(c.tax_id || '—')}</td><td>${fmtDate(c.created_at)}</td><td class="text-right whitespace-nowrap"><button class="btn btn-light btn-sm" data-subs="${c.id}">Subscriptions</button>
+      <button class="btn btn-light btn-sm" data-ed="${c.id}">Edit</button></td></tr>`).join('') || emptyRow(8)}</tbody></table></div>`;
   $('#new-cust').addEventListener('click', () => formModal('New customer account', [
     { name: 'company_name', label: 'Company' }, { name: 'name', label: 'Contact name', required: true },
     { name: 'email', label: 'Email', type: 'email', required: true }, { name: 'phone', label: 'Phone' },
@@ -1429,10 +1429,18 @@ async function viewCustomers(main) {
   }));
   $$('[data-ed]').forEach(b => b.addEventListener('click', () => {
     const c = customers.find(x => x.id == b.dataset.ed);
-    formModal('Edit customer', [
-      { name: 'company_name', label: 'Company', value: c.company_name }, { name: 'name', label: 'Contact name', required: true, value: c.name },
-      { name: 'phone', label: 'Phone', value: c.phone }, { name: 'is_active', label: 'Account active', type: 'checkbox', value: c.is_active },
-    ], async v => { await api('/users/' + c.id, { method: 'PATCH', body: v }); invalidate('customers'); toast('Saved'); refresh(); });
+    const sec = profileSections(c);
+    const fields = [...sec.contact, ...sec.company, ...sec.address, ...sec.billing,
+      { name: 'is_active', label: 'Account active', type: 'checkbox', value: c.is_active, span: 'sm:col-span-2' }];
+    const group = (t, f) => `<div class="mb-2 mt-6 text-xs font-semibold uppercase tracking-wider text-slate-500">${t}</div>${formGrid(f)}`;
+    const m = openModal(`Edit ${esc(c.company_name || c.name)}`, `<form id="ce">${group('Contact', sec.contact)}${group('Company', sec.company)}
+      ${group('Billing address', sec.address)}${statesDatalist()}${group('Preferences', [...sec.billing, fields[fields.length - 1]])}</form>`,
+      { wide: true, footer: '<button class="btn btn-light" data-close>Cancel</button><button class="btn btn-primary" id="ce-save">Save</button>' });
+    $('#ce-save', m.el).addEventListener('click', async () => {
+      if (!$('#ce', m.el).reportValidity()) return;
+      await run(() => api('/users/' + c.id, { method: 'PATCH', body: readFields($('#ce', m.el), fields) }), 'Customer saved');
+      m.close(); invalidate('customers'); refresh();
+    });
   }));
 }
 
@@ -1886,22 +1894,118 @@ async function viewSubscribe(main) {
     }, { submitLabel: 'Subscribe now', extraHtml: '<p class="text-xs text-gray-500 mt-4">Your subscription starts today; your first invoice is issued on the next billing run.</p>' });
   }));
 }
+// ---------- customer profile fields (shared by the portal profile and staff edit) ----------
+const INDUSTRIES = ['Retail', 'Manufacturing', 'Healthcare', 'Education', 'Finance', 'Logistics', 'Hospitality', 'Technology',
+  'Media', 'Construction', 'Agriculture', 'Professional services', 'Non-profit', 'Other'];
+const SIZES = ['1-10', '11-50', '51-200', '201-1000', '1000+'];
+const COUNTRIES = ['India', 'United States', 'United Kingdom', 'United Arab Emirates', 'Singapore', 'Australia', 'Canada', 'Germany', 'France', 'Other'];
+const IN_STATES = ['Andhra Pradesh', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra',
+  'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Tamil Nadu', 'Telangana', 'Uttar Pradesh', 'West Bengal'];
+function profileSections(u) {
+  return {
+    contact: [
+      { name: 'name', label: 'Full name', required: true, value: u.name },
+      { name: 'job_title', label: 'Job title', value: u.job_title, placeholder: 'e.g. Head of Finance' },
+      { name: 'phone', label: 'Phone', type: 'tel', value: u.phone, placeholder: '+91 98400 00000' },
+      { name: 'billing_email', label: 'Billing email', type: 'email', value: u.billing_email, placeholder: u.email,
+        help: 'Invoices, receipts and reminders go here. Leave empty to use your login email.' },
+    ],
+    company: [
+      { name: 'company_name', label: 'Company name', value: u.company_name, span: 'sm:col-span-2' },
+      { name: 'industry', label: 'Industry', type: 'select', blank: '— choose —', value: u.industry, options: INDUSTRIES.map(i => [i, i]) },
+      { name: 'company_size', label: 'Company size', type: 'select', blank: '— choose —', value: u.company_size, options: SIZES.map(s => [s, `${s} people`]) },
+      { name: 'website', label: 'Website', value: u.website, placeholder: 'example.com' },
+      { name: 'tax_id', label: 'GSTIN / Tax ID', value: u.tax_id, placeholder: '33ABCDE1234F1Z5', help: 'Printed on your invoices.' },
+    ],
+    address: [
+      { name: 'address_line1', label: 'Address line 1', value: u.address_line1, span: 'sm:col-span-2', placeholder: 'Building, street' },
+      { name: 'address_line2', label: 'Address line 2', value: u.address_line2, span: 'sm:col-span-2', placeholder: 'Area, landmark (optional)' },
+      { name: 'city', label: 'City', value: u.city },
+      { name: 'state', label: 'State / region', value: u.state, list: 'states-list' },
+      { name: 'postal_code', label: 'PIN / postal code', value: u.postal_code },
+      { name: 'country', label: 'Country', type: 'select', blank: '— choose —', value: u.country, options: COUNTRIES.map(c => [c, c]) },
+    ],
+    billing: [
+      { name: 'preferred_payment_method', label: 'Preferred payment method', type: 'select', blank: '— no preference —',
+        value: u.preferred_payment_method, options: METHODS, span: 'sm:col-span-2' },
+      { name: 'notify_offers', label: 'Send me offers and product news', type: 'checkbox', value: u.notify_offers !== false, span: 'sm:col-span-2' },
+    ],
+  };
+}
+const statesDatalist = () => `<datalist id="states-list">${IN_STATES.map(s => `<option value="${s}">`).join('')}</datalist>`;
+function addressPreview(u) {
+  const city = [u.city, u.postal_code].filter(Boolean).join(' ');
+  const lines = [u.company_name || u.name, u.address_line1, u.address_line2, [city, u.state].filter(Boolean).join(', '), u.country].filter(Boolean);
+  return lines.length > 1 ? lines.map(esc).join('<br>') + (u.tax_id ? `<br><span class="text-slate-500">GSTIN ${esc(u.tax_id)}</span>` : '')
+    : '<span class="text-slate-400">Add your address to see how it appears on invoices.</span>';
+}
+
 async function viewProfile(main) {
-  const me = await api('/auth/me');
-  main.innerHTML = pageHeader('Profile', esc(me.email)) + `<div class="grid md:grid-cols-2 gap-4 max-w-4xl">
-    <form id="pf" class="card p-5 space-y-4"><h3 class="font-semibold">Details</h3>
-      ${field({ name: 'name', label: 'Name', value: me.name, required: true })}${field({ name: 'company_name', label: 'Company', value: me.company_name })}
-      ${field({ name: 'phone', label: 'Phone', value: me.phone })}<button class="btn btn-primary">Save</button></form>
-    <form id="cp" class="card p-5 space-y-4"><h3 class="font-semibold">Change password</h3>
-      ${field({ name: 'current_password', label: 'Current password', type: 'password', required: true })}
-      <div>${field({ name: 'new_password', label: 'New password', type: 'password', required: true })}<p class="text-xs mt-1" id="pwh"></p></div>
-      <button class="btn btn-primary">Change password</button></form></div>`;
-  pwHint($('[name=new_password]'), $('#pwh'));
-  $('#pf').addEventListener('submit', async e => {
+  const [me, acct] = await Promise.all([api('/auth/me'), api('/portal/account')]);
+  const sec = profileSections(me);
+  const initials = me.name.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase();
+  const card = (id, ic, title, sub, body, extra = '') => `<form class="card overflow-hidden" id="${id}">
+    <div class="card-head"><div class="t">${icon(ic)} ${title}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>
+    <div class="p-6">${body}${extra}</div>
+    <div class="flex justify-end border-t border-slate-100 bg-slate-50 px-6 py-3"><button class="btn btn-primary btn-sm">${icon('save')} Save</button></div></form>`;
+  main.innerHTML = `
+    <div class="card mb-6 overflow-hidden">
+      <div class="h-20" style="background:linear-gradient(120deg, var(--brand-900), var(--brand-solid))"></div>
+      <div class="flex flex-wrap items-end gap-5 px-6 pb-5">
+        <div class="-mt-10 grid h-20 w-20 shrink-0 place-items-center rounded-2xl text-2xl font-bold text-white ring-4" style="background:var(--brand-solid);--tw-ring-color:var(--surface)">${esc(initials)}</div>
+        <div class="min-w-[220px] flex-1 pt-3">
+          <h1 class="text-2xl font-bold tracking-tight">${esc(me.name)}</h1>
+          <div class="text-sm text-slate-600">${[me.job_title, me.company_name].filter(Boolean).map(esc).join(' · ') || 'Add your job title and company below'}</div>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="badge normal-case b-slate">${acct.customer_id}</span><span class="badge normal-case b-slate">${icon('mail', 'h-3 w-3')} ${esc(me.email)}</span>
+            <span class="badge normal-case b-slate">Customer since ${fmtDate(acct.member_since)}</span>
+            ${me.tax_id ? `<span class="badge normal-case b-teal">GSTIN ${esc(me.tax_id)}</span>` : ''}</div></div>
+        <div class="w-full sm:w-56"><div class="mb-1 flex justify-between text-xs"><span class="text-slate-500">Profile complete</span><b>${acct.profile_complete}%</b></div>
+          <div class="progress"><div style="width:${acct.profile_complete}%"></div></div></div>
+      </div></div>
+
+    <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      ${stat('repeat', 'Active subscriptions', acct.active, `${acct.subscriptions} in total${acct.paused ? ` · ${acct.paused} paused` : ''}`)}
+      ${stat('calendar-clock', 'Monthly spend', money(acct.monthly_spend), 'before tax, across active plans', 'blue')}
+      ${stat('wallet', 'Paid to date', money(acct.lifetime_paid), acct.last_payment ? `last ${money(acct.last_payment.amount)} on ${fmtDate(acct.last_payment.date)}` : 'no payments yet', 'green')}
+      ${stat('hourglass', 'Outstanding', money(acct.outstanding), acct.overdue ? `${money(acct.overdue)} overdue` : 'nothing overdue', acct.overdue ? 'red' : 'amber')}
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-2">
+      ${card('pf-contact', 'user', 'Contact details', '', formGrid(sec.contact) + `<div class="mt-4 text-xs text-slate-500">Login email: <b>${esc(me.email)}</b> (used to sign in; contact us to change it)</div>`)}
+      ${card('pf-company', 'building-2', 'Company', 'shown on invoices', formGrid(sec.company))}
+      ${card('pf-address', 'map-pin', 'Billing address', '', formGrid(sec.address) + statesDatalist(),
+        `<div class="mt-5 rounded-xl border border-dashed border-slate-300 p-4 text-sm"><div class="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">On your invoices</div><div id="addr-preview">${addressPreview(me)}</div></div>`)}
+      ${card('pf-billing', 'credit-card', 'Billing preferences', '', formGrid(sec.billing),
+        `<div class="mt-5 space-y-2 text-sm"><div class="text-xs font-semibold uppercase tracking-wider text-slate-500">Always sent</div>
+          ${['Invoices and payment receipts', 'Payment reminders for overdue invoices', 'Price change notices (at least 30 days ahead)', 'Password reset links']
+            .map(t => `<div class="flex items-center gap-2 text-slate-600">${icon('check-circle-2', 'h-4 w-4 text-teal')} ${t}</div>`).join('')}
+          <p class="text-xs text-slate-500">These are part of your account, so they can't be switched off.</p></div>`)}
+      <form id="cp" class="card overflow-hidden"><div class="card-head"><div class="t">${icon('key-round')} Change password</div></div>
+        <div class="space-y-4 p-6">${field({ name: 'current_password', label: 'Current password', type: 'password', required: true })}
+          <div>${field({ name: 'new_password', label: 'New password', type: 'password', required: true })}<p class="text-xs mt-1" id="pwh"></p></div></div>
+        <div class="flex justify-end border-t border-slate-100 bg-slate-50 px-6 py-3"><button class="btn btn-primary btn-sm">${icon('key-round')} Change password</button></div></form>
+      <div class="card h-fit overflow-hidden"><div class="card-head"><div class="t">${icon('shield')} Account</div></div>
+        <div class="space-y-2.5 p-6 text-sm">${[['Customer ID', acct.customer_id], ['Account type', 'Customer'], ['Sign-in email', esc(me.email)],
+          ['Customer since', fmtDate(acct.member_since)], ['Lifetime billed', money(acct.lifetime_billed)], ['Subscriptions', acct.subscriptions]]
+          .map(([k, v]) => `<div class="flex justify-between gap-3"><span class="text-slate-500">${k}</span><span class="text-right font-medium">${v}</span></div>`).join('')}
+          <div class="flex flex-wrap gap-2 pt-3"><a class="btn btn-light btn-sm" href="#/my-invoices">${icon('receipt')} Invoices</a>
+            <a class="btn btn-light btn-sm" href="#/passes">${icon('qr-code')} QR passes</a><a class="btn btn-light btn-sm" href="#/timeline">${icon('history')} Timeline</a></div></div></div>
+    </div>`;
+
+  const wire = (id, fields) => $('#' + id).addEventListener('submit', async e => {
     e.preventDefault();
-    const u = await run(() => api('/auth/me', { method: 'PATCH', body: Object.fromEntries(new FormData(e.target)) }), 'Profile saved');
+    if (!e.target.reportValidity()) return;
+    const body = readFields(e.target, fields);
+    const u = await run(() => api('/auth/me', { method: 'PATCH', body }), 'Saved');
     S.user = u; localStorage.setItem('bl_user', JSON.stringify(u)); refresh();
   });
+  wire('pf-contact', sec.contact); wire('pf-company', sec.company); wire('pf-address', sec.address); wire('pf-billing', sec.billing);
+  $('#pf-address').addEventListener('input', () => {
+    const v = readFields($('#pf-address'), sec.address);
+    $('#addr-preview').innerHTML = addressPreview({ ...me, ...Object.fromEntries(Object.entries(v).map(([k, x]) => [k, x || ''])) });
+  });
+  pwHint($('[name=new_password]'), $('#pwh'));
   $('#cp').addEventListener('submit', async e => {
     e.preventDefault();
     await run(() => api('/auth/change-password', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }), 'Password changed');

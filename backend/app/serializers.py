@@ -42,7 +42,8 @@ def invoice_out(inv: Invoice, detail: bool = True, today: date | None = None) ->
     return {
         "id": inv.id, "invoice_number": inv.invoice_number, "subscription_id": inv.subscription_id,
         "subscription_number": inv.subscription.subscription_number, "customer_id": inv.customer_id,
-        "customer_name": inv.customer.company_name or inv.customer.name, "customer_email": inv.customer.email,
+        "customer_name": inv.customer.company_name or inv.customer.name, "customer_email": inv.customer.billing_to,
+        "customer_address": inv.customer.address_lines, "customer_tax_id": inv.customer.tax_id,
         "period_start": inv.period_start, "period_end": inv.period_end, "issue_date": inv.issue_date,
         "due_date": inv.due_date, "status": inv.status, "subtotal": inv.subtotal,
         "discount_amount": inv.discount_amount, "discount_code": inv.discount_code, "tax_amount": inv.tax_amount,

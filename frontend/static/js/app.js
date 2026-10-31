@@ -264,6 +264,55 @@ const DEMO = [
   ['Customer · Retail shop', 'retail@shop.com', 'CustomerPass#2026', 'b-customer'],
 ];
 
+// ---------- perspective grid (login background) ----------
+// An endless floor grid scrolling toward the horizon, drawn on a canvas. Stops by itself once the canvas leaves the page.
+function perspectiveGrid(canvas, { color = [240, 160, 232], speed = 0.5, cell = 1, depth = 10, fade = 1.1, horizon = 0.55 } = {}) {
+  const ctx = canvas.getContext('2d');
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let w = 0, h = 0, start = performance.now();
+  const resize = () => {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    w = canvas.clientWidth; h = canvas.clientHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  const rgba = a => `rgba(${color[0]},${color[1]},${color[2]},${a.toFixed(3)})`;
+  const frame = now => {
+    if (!canvas.isConnected) { removeEventListener('resize', resize); return; }
+    ctx.clearRect(0, 0, w, h);
+    const hy = h * horizon;                 // screen y of the horizon
+    const f = h * 0.9, camH = 1;            // focal length and camera height above the floor
+    const near = 0.35, far = depth;
+    const project = (x, z) => [w / 2 + (x * f) / z, hy + (camH * f) / z];
+    const alpha = z => Math.max(0, 1 - z / far) ** fade;
+    const step = cell;
+    const t = still ? 0 : ((now - start) / 1000) * speed;
+    ctx.lineWidth = 1.25;
+    const zBottom = Math.max(near, (camH * f) / (h - hy));   // floor depth at the bottom edge of the screen
+    // Lines running across the floor, sliding toward the viewer.
+    for (let z = step - (t % step); z < far; z += step) {
+      if (z < near) continue;
+      const [, y] = project(0, z);
+      ctx.strokeStyle = rgba(alpha(z));
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+    // Lines running toward the horizon, fading with distance.
+    const span = Math.ceil(((w / 2) * zBottom) / f / step) + 1;
+    for (let i = -span; i <= span; i++) {
+      const x = i * step;
+      const [x1, y1] = project(x, zBottom), [x2, y2] = project(x, far);
+      const g = ctx.createLinearGradient(x1, y1, x2, y2);
+      g.addColorStop(0, rgba(alpha(zBottom))); g.addColorStop(0.5, rgba(alpha((zBottom + far) / 3) * 0.8)); g.addColorStop(1, rgba(0));
+      ctx.strokeStyle = g;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+    if (!still) requestAnimationFrame(frame);
+  };
+  resize();
+  addEventListener('resize', resize);
+  requestAnimationFrame(frame);
+}
+
 // ---------- intro screen ----------
 // Shown once per visit before the login page; any key, click or tap moves on.
 const INTRO_CARDS = [
@@ -339,19 +388,23 @@ function renderAuth(mode = 'login') {
       <div>${field({ name: 'new_password', label: 'New password', type: 'password', required: true })}<p class="text-xs mt-1" id="pwh"></p></div>
       <button class="btn btn-primary w-full justify-center">Set new password</button></form>`;
 
-  $('#app').innerHTML = `<div class="min-h-screen grid lg:grid-cols-2 ${S.fromIntro ? 'auth-enter' : ''}">
-    <div class="hidden lg:flex text-white p-12 flex-col justify-between" style="background:linear-gradient(160deg, var(--brand-900), var(--night))">
-      <div class="text-2xl font-bold tracking-tight">brightloop<span class="opacity-60">.</span></div>
-      <div><h1 class="text-4xl font-semibold leading-tight">Plans, subscriptions and recurring billing in one place.</h1>
-        <ul class="mt-8 space-y-3 text-white/85 text-sm">
-          <li>✓ Quotation templates → subscriptions in one click</li><li>✓ Billing day runs itself: never billed twice, never skipped</li>
-          <li>✓ Taxes and discounts applied automatically</li><li>✓ Live MRR, ARR, collections and overdue chase list</li></ul></div>
-      <div class="text-xs text-white/60">Brightloop Software · Subscription Management System</div></div>
-    <div class="flex items-center justify-center p-6"><div class="w-full max-w-md">
-      <div class="lg:hidden text-2xl font-bold text-odoo mb-6">brightloop.</div>
-      <h2 class="text-2xl font-semibold mb-1">${mode === 'reset' ? 'Reset password' : 'Welcome'}</h2>
-      <p class="text-sm text-gray-500 mb-5">${mode === 'reset' ? '' : 'Sign in to your Brightloop account.'}</p>
-      ${tabs}${body}</div></div></div>`;
+  $('#app').innerHTML = `<div class="auth-page ${S.fromIntro ? 'auth-enter' : ''}">
+    <canvas id="login-grid" aria-hidden="true"></canvas>
+    <div class="relative z-10 min-h-screen grid lg:grid-cols-2">
+      <div class="hidden lg:flex text-white p-12 flex-col justify-between">
+        <div class="text-2xl font-bold tracking-tight">brightloop<span class="opacity-60">.</span></div>
+        <div class="pb-24"><h1 class="text-5xl font-semibold leading-[1.05] tracking-tight">Plans, subscriptions and recurring billing in one place.</h1>
+          <ul class="mt-8 space-y-3 text-white/80 text-sm">
+            <li>✓ Quotation templates → subscriptions in one click</li><li>✓ Billing day runs itself: never billed twice, never skipped</li>
+            <li>✓ Taxes and discounts applied automatically</li><li>✓ Live MRR, ARR, collections and overdue chase list</li></ul></div>
+        <div class="text-xs text-white/50">Brightloop Software · Subscription Management System</div></div>
+      <div class="flex items-center justify-center p-6"><div class="w-full max-w-md">
+        <div class="lg:hidden text-2xl font-bold text-white mb-6">brightloop<span class="opacity-60">.</span></div>
+        <div class="auth-card">
+          <h2 class="text-2xl font-semibold mb-1">${mode === 'reset' ? 'Reset password' : 'Welcome'}</h2>
+          <p class="text-sm text-gray-500 mb-5">${mode === 'reset' ? '' : 'Sign in to your Brightloop account.'}</p>
+          ${tabs}${body}</div></div></div></div></div>`;
+  perspectiveGrid($('#login-grid'));
 
   $$('[data-mode]').forEach(a => a.addEventListener('click', () => renderAuth(a.dataset.mode)));
   $$('[data-demo]').forEach(b => b.addEventListener('click', async () => {

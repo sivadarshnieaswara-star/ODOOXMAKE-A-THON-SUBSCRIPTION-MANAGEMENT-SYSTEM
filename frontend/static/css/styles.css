@@ -221,3 +221,15 @@ header nav::-webkit-scrollbar { height: 0; }
   .intro-col, .intro-pulse { animation: none; }
   .intro-wall, .intro-copy, .intro { transition-duration: .01s; transition-delay: 0s; }
 }
+
+/* ---------- Login page: dark backdrop with the perspective grid floor ---------- */
+.auth-page { position: relative; min-height: 100vh; overflow: hidden;
+  background: radial-gradient(900px 500px at 20% 0%, #3b2236 0%, transparent 60%), linear-gradient(180deg, var(--brand-900) 0%, var(--night) 55%, #0d0a0f 100%); }
+#login-grid { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* Glow along the horizon and a fade into the page colour at the bottom. */
+.auth-page::before { content: ""; position: absolute; left: 0; right: 0; top: 55%; height: 2px; transform: translateY(-1px);
+  background: radial-gradient(closest-side, rgba(227,166,214,.55), transparent); filter: blur(2px); pointer-events: none; }
+.auth-page::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 22%; pointer-events: none;
+  background: linear-gradient(0deg, #0d0a0f, transparent); }
+.auth-card { background: var(--surface); color: var(--ink); border-radius: 1.25rem; padding: 2rem;
+  box-shadow: 0 30px 80px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.06); }

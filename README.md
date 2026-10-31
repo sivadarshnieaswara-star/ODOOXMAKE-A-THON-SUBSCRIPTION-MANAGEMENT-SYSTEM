@@ -1,29 +1,30 @@
-# Brightloop Subscription Management System
+# Brightloop - Subscription Management System
 
-One system to run plans, subscriptions and recurring billing for Brightloop Software
-(Odoo x Make-A-Thon challenge). FastAPI + SQLAlchemy + SQLite backend, Tailwind single-page frontend.
+Our project for the Odoo x Make-A-Thon. The problem statement was to build one system for a
+subscription business (Brightloop Software) that handles products, plans, subscriptions,
+recurring invoices, payments and reporting, instead of spreadsheets and manual invoices.
 
-## Run it
+Built with FastAPI + SQLAlchemy + SQLite on the backend and plain JS + Tailwind on the frontend.
+
+## Running it
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install fastapi "uvicorn[standard]" sqlalchemy pydantic email-validator python-dateutil pyjwt jinja2 httpx pytest
-.venv/bin/python run.py          # http://127.0.0.1:8000  (API docs at /docs)
+.venv/bin/python run.py
 ```
 
-With uv: `uv run run.py` and `uv run pytest`.
+Open http://127.0.0.1:8000. API docs are at /docs.
 
-On first start the database (`brightloop.db`) is created and seeded with demo data. Delete the file to start over;
-set `SEED_DEMO_DATA=0` for an empty system with only the admin account.
+The first run creates `brightloop.db` and fills it with sample data so there's something to look at.
+Delete the file if you want to start fresh (or run with `SEED_DEMO_DATA=0` to get just the admin account).
 
-| Role | Email | Password |
-|---|---|---|
-| Admin | admin@brightloop.com | BrightloopAdmin#2026 |
-| Staff | staff@brightloop.com | BrightloopStaff#2026 |
-| Customer (enterprise) | acme@corp.com | CustomerPass#2026 |
-| Customer (small shop) | retail@shop.com | CustomerPass#2026 |
+Logins for the sample data (there are also quick-login buttons on the login page):
 
-The login page has one-click buttons for each.
+- admin: admin@brightloop.com / BrightloopAdmin#2026
+- staff: staff@brightloop.com / BrightloopStaff#2026
+- customer: acme@corp.com / CustomerPass#2026
+- customer: retail@shop.com / CustomerPass#2026
 
 ## Tests
 
@@ -31,43 +32,66 @@ The login page has one-click buttons for each.
 .venv/bin/python -m pytest -q
 ```
 
-56 tests cover the four phases, including a load test that inserts 5,000 subscriptions, 20,000 invoices and
-15,000 payments and checks every finance page answers in under 2 seconds.
+There's one test per requirement more or less, split by phase. `test_phase4.py` also loads 5000
+subscriptions and ~20k invoices to check the dashboard and lists still come back in under 2 seconds.
 
-## How each scene is handled
+## What it does
 
-| Scene | What the system does |
-|---|---|
-| Sign-up & access | Unique email; password must be more than 8 characters with upper, lower and special characters; PBKDF2-SHA256 hashing; JWT sessions. Forgot-password emails a one-hour, single-use link. Admin / staff / customer roles; only the admin adds staff. |
-| Launching a plan | Products with type, sales and cost price, notes and variants (Brand: Odoo Brand Edition adds 560). Plans with daily/weekly/monthly/yearly billing, minimum quantity, availability dates and per-plan rules: auto-close at expiry, close early, pause, renew. |
-| Quote → subscription | Quotation templates (plan + lines + validity days + contract length) create a pre-filled quote in one click. Numbers `SUB-00001…`. Draft → Quotation → Confirmed → Active → Closed (plus Paused), every change recorded in a history timeline. Customers can accept or decline quotes themselves. |
-| Billing day | "Run billing" invoices every due subscription (`INV-00001…`) with customer, lines, taxes and totals filled in. Idempotent: one invoice per subscription per period, enforced by a unique constraint, so running it twice never double-bills; missed periods are caught up so nothing is skipped. Month-end dates do not drift (31 Jan → 28 Feb → 31 Mar). Billing stops at expiry and subscriptions auto-close when their plan says so. Invoices: Draft → Confirmed → Paid (or Cancelled), send by email, print / save as PDF. |
-| Better price | Admin-only discount rules: percentage or fixed, minimum purchase or quantity, date window, max uses, for a product or whole subscriptions (optionally one specific subscription). The best eligible rule is applied to the next invoice automatically and stops once expired or used up; tax is computed on the discounted amount. |
-| Money comes in | Payments with method, amount, date and note against an invoice; partial payments reduce the balance, the invoice flips to Paid at zero. Overpayments are refused. Customers can pay their own invoices in the portal (simulated checkout). Overdue chase list sorted by age with contact details. |
-| Finance lead | Dashboard: active subscriptions, MRR, ARR, collected, outstanding, overdue, 12-month invoiced-vs-collected trend, status and plan breakdowns, filters by date range, plan and customer. |
+**Accounts and roles** - sign up with email + password (password has to be more than 8 chars with
+upper, lower and a special character). One account per email. Forgot password sends a reset link
+that works once and expires after an hour. Three roles: admin, staff and customer. Only the admin can
+add staff, and customers only ever see their own stuff.
 
-## Project layout
+**Products and plans** - products have a type, sales/cost price, notes and variants. A variant adds
+an extra amount on top of the price (e.g. Odoo brand edition = +560). Plans have a price, billing
+frequency (daily/weekly/monthly/yearly), minimum quantity, availability dates, and switches for
+whether they auto-close, can be closed early, paused or renewed.
+
+**Quotes and subscriptions** - staff can save quotation templates (plan + product lines + how many days
+the quote is valid) and create a quote for a customer from one in a click. Subscriptions get numbers
+like SUB-00001 and go Draft -> Quotation -> Confirmed -> Active -> Closed (can also be Paused).
+Every status change is logged so you can see the history.
+
+**Billing** - the "Run billing" button creates invoices for every subscription that's due, with the
+lines, tax and totals filled in from the subscription. You can run it as many times as you want, it
+won't create the same invoice twice (there's a unique constraint on subscription + period), and if
+billing was missed for a few periods it catches up. Monthly billing keeps the same day of month
+(31 Jan -> 28 Feb -> 31 Mar). Invoices go Draft -> Confirmed -> Paid, or Cancelled, and can be
+emailed or printed.
+
+**Discounts and taxes** - admin sets up tax rules (one default, or per product) and discount rules
+(percent or fixed, min amount/quantity, start/end date, max uses, for a product or a whole
+subscription). If a discount applies it's added to the next invoice automatically, and it stops once
+it expires or runs out of uses. If more than one applies, the customer gets the bigger one.
+
+**Payments** - record a payment (method, amount, date, note) against an invoice. Part payments lower
+the balance, and the invoice switches to Paid when it hits zero. Customers can also pay from their
+portal (the checkout is simulated, no real payment gateway).
+
+**Dashboard** - active subscriptions, MRR, ARR, money collected, outstanding and overdue amounts,
+a 12 month chart of invoiced vs collected, and a list of overdue invoices with contact details.
+Can be filtered by date, plan and customer.
+
+## Folder structure
 
 ```
 backend/app/
-  main.py            app, routers, startup (create tables, bootstrap admin, seed demo)
-  models.py          all tables
-  schemas.py         request/response validation
-  auth.py            password policy, hashing, JWT, role guards
-  services/          subscription lifecycle, billing engine, discounts, taxes, payments, analytics
-  routers/           REST endpoints
-  seed_data.py       admin bootstrap + demo dataset
-backend/tests/       pytest suites per phase
-frontend/templates/  index.html (SPA shell), invoice_print.html
-frontend/static/     app.js, styles.css
+  main.py          starts the app, creates tables, seeds data
+  models.py        database tables
+  schemas.py       request/response models
+  auth.py          passwords, tokens, role checks
+  services/        billing, discounts, taxes, payments, subscriptions, dashboard numbers
+  routers/         API endpoints
+  seed_data.py     sample data
+backend/tests/     tests
+frontend/          index.html, invoice print page, app.js, styles.css
 ```
 
-## Configuration
+## Settings (env vars, all optional)
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `DATABASE_URL` | `sqlite:///brightloop.db` | Database location |
-| `SECRET_KEY` | generated into `.secret_key` | JWT signing key |
-| `APP_BASE_URL` | `http://127.0.0.1:8000` | Used in reset-password links |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | unset | Real email delivery. Without them emails are logged and shown to the admin under **Email outbox**. |
-| `SEED_DEMO_DATA` | `1` | Seed demo data into an empty database |
+- `DATABASE_URL` - defaults to `sqlite:///brightloop.db`
+- `SECRET_KEY` - for signing login tokens; if not set one is generated into `.secret_key`
+- `APP_BASE_URL` - used in the password reset link, defaults to http://127.0.0.1:8000
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` - to actually send emails.
+  Without these, emails are just saved and the admin can read them under "Email outbox".
+- `SEED_DEMO_DATA` - set to 0 to skip the sample data

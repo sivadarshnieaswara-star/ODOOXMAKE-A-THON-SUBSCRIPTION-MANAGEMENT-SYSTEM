@@ -33,6 +33,7 @@ const isAdmin = () => S.user && S.user.role === 'admin';
 const FREQ = { daily: 'day', weekly: 'week', monthly: 'month', yearly: 'year' };
 const TERMS = [['immediate', 'Immediate'], ['net_7', 'Net 7'], ['net_15', 'Net 15'], ['net_30', 'Net 30'], ['net_45', 'Net 45']];
 const METHODS = [['bank_transfer', 'Bank transfer'], ['card', 'Card'], ['upi', 'UPI'], ['stripe', 'Stripe'], ['cash', 'Cash']];
+const methodName = m => (METHODS.find(x => x[0] === m) || [m, label(m)])[1];
 
 async function api(path, { method = 'GET', body, raw = false } = {}) {
   const headers = { 'Content-Type': 'application/json' };
@@ -433,7 +434,7 @@ async function viewDashboard(main) {
           <div class="flex h-3 rounded overflow-hidden mb-3">${statuses.map(k => `<div class="b-${k}" style="width:${(s.subscriptions_by_status[k] || 0) / totalSubs * 100}%"></div>`).join('')}</div>
           <div class="grid grid-cols-2 gap-y-1 text-sm">${statuses.map(k => `<div>${badge(k)} <span class="ml-1 font-medium">${s.subscriptions_by_status[k] || 0}</span></div>`).join('')}</div></div>
         <div><h3 class="font-semibold mb-2">Active by plan</h3>${s.active_by_plan.map(p => `<div class="flex justify-between text-sm py-0.5"><span>${esc(p.plan)}</span><b>${p.count}</b></div>`).join('') || '<p class="text-sm text-gray-400">None</p>'}</div>
-        <div><h3 class="font-semibold mb-2">Collected by method</h3>${Object.entries(s.collected_by_method).map(([m, a]) => `<div class="flex justify-between text-sm py-0.5"><span class="capitalize">${label(m)}</span><b>${money(a)}</b></div>`).join('') || '<p class="text-sm text-gray-400">None</p>'}</div>
+        <div><h3 class="font-semibold mb-2">Collected by method</h3>${Object.entries(s.collected_by_method).map(([m, a]) => `<div class="flex justify-between text-sm py-0.5"><span>${methodName(m)}</span><b>${money(a)}</b></div>`).join('') || '<p class="text-sm text-gray-400">None</p>'}</div>
       </div></div>
     <div class="card"><div class="px-4 py-3 border-b flex items-center justify-between"><h3 class="font-semibold">Overdue chase list</h3>
       <a href="#/invoices" class="text-sm text-odoo" id="see-overdue">Open in invoices →</a></div>
@@ -690,7 +691,7 @@ async function showInvoice(id) {
       ${inv.discount_amount ? `<tr><td class="text-gray-500 py-0.5">Discount <span class="badge b-confirmed">${esc(inv.discount_code)}</span></td><td class="num">-${money(inv.discount_amount)}</td></tr>` : ''}
       <tr><td class="text-gray-500 py-0.5">Tax</td><td class="num">${money(inv.tax_amount)}</td></tr>
       <tr class="border-t font-semibold"><td class="py-1">Total</td><td class="num">${money(inv.total_amount)}</td></tr>
-      ${inv.payments.map(p => `<tr class="text-teal"><td class="py-0.5">Paid ${fmtDate(p.payment_date)} · ${label(p.payment_method)}</td><td class="num">-${money(p.amount)}</td></tr>`).join('')}
+      ${inv.payments.map(p => `<tr class="text-teal"><td class="py-0.5">Paid ${fmtDate(p.payment_date)} · ${methodName(p.payment_method)}</td><td class="num">-${money(p.amount)}</td></tr>`).join('')}
       <tr class="font-semibold"><td class="py-1">Balance due</td><td class="num">${money(inv.balance_due)}</td></tr></table></div>`,
     { wide: true, footer: btns.join('') });
   const done = msg => { toast(msg); m.close(); refresh(); };
@@ -752,7 +753,7 @@ function paymentsTable(data, showCustomer) {
   return `<div class="card overflow-x-auto"><table class="tbl"><thead><tr><th>Payment</th><th>Date</th>${showCustomer ? '<th>Customer</th>' : ''}<th>Invoice</th>
     <th>Method</th><th>Note</th><th class="num">Amount</th></tr></thead><tbody>
     ${data.items.map(p => `<tr class="clickable" data-inv="${p.invoice_id}"><td class="font-medium">${p.payment_number}</td><td>${fmtDate(p.payment_date)}</td>
-      ${showCustomer ? `<td>${esc(p.customer_name)}</td>` : ''}<td>${p.invoice_number}</td><td class="capitalize">${label(p.payment_method)}</td>
+      ${showCustomer ? `<td>${esc(p.customer_name)}</td>` : ''}<td>${p.invoice_number}</td><td>${methodName(p.payment_method)}</td>
       <td class="text-gray-500">${esc(p.note || '')}</td><td class="num font-semibold text-teal">${money(p.amount)}</td></tr>`).join('') || emptyRow(7)}
     </tbody></table>${data.total > data.items.length ? `<p class="text-xs text-gray-500 p-3">Showing latest ${data.items.length} of ${data.total}.</p>` : ''}</div>`;
 }

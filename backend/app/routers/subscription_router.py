@@ -178,6 +178,7 @@ def delete_template(template_id: int, user: User = Depends(require_staff), db: S
 
 
 @router.post("/templates/{template_id}/use", response_model=SubscriptionOut, status_code=201)
+@router.post("/templates/{template_id}/instantiate", response_model=SubscriptionOut, status_code=201)
 def use_template(template_id: int, data: TemplateUseIn, user: User = Depends(require_staff),
                  db: Session = Depends(get_db)):
     """Create a ready-to-send subscription quote from the template in one step."""

@@ -448,3 +448,9 @@ class EmailOut(ORM):
     body: str
     delivered: bool
     created_at: datetime
+
+
+class EmailSendTestIn(BaseModel):
+    to_email: EmailStr
+    subject: str = "Brightloop System Test Email"
+    body: str = "This is an automated test notification from the Brightloop Subscription Management System."

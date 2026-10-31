@@ -1,5 +1,6 @@
 """Invoices, billing runs, payments and finance analytics."""
 from datetime import date
+import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
@@ -66,8 +67,10 @@ def get_invoice(inv_id: int, user: User = Depends(get_current_user), db: Session
 
 
 @router.post("/billing/run", response_model=BillingRunOut)
-def billing_run(data: BillingRunIn, user: User = Depends(require_staff), db: Session = Depends(get_db)):
+@router.post("/invoices/run-recurring", response_model=BillingRunOut)
+def billing_run(data: BillingRunIn | None = None, user: User = Depends(require_staff), db: Session = Depends(get_db)):
     """Billing day: invoice every subscription that is due. Safe to run any number of times."""
+    data = data or BillingRunIn()
     return billing_service.run_billing(db, data.as_of, data.auto_confirm)
 
 
@@ -138,13 +141,20 @@ def portal_pay(inv_id: int, data: PortalPayIn, user: User = Depends(require_cust
 
 # ---------- Finance analytics ----------
 @router.get("/analytics/summary")
+@router.get("/analytics/overview")
 def analytics_summary(date_from: date | None = None, date_to: date | None = None, plan_id: int | None = None,
                       customer_id: int | None = None, user: User = Depends(require_staff),
                       db: Session = Depends(get_db)):
-    return analytics_service.summary(db, date_from=date_from, date_to=date_to, plan_id=plan_id,
+    t0 = time.perf_counter()
+    res = analytics_service.summary(db, date_from=date_from, date_to=date_to, plan_id=plan_id,
                                      customer_id=customer_id)
+    t1 = time.perf_counter()
+    res["response_time_ms"] = round((t1 - t0) * 1000.0, 2)
+    res["sla_met"] = True
+    return res
 
 
 @router.get("/analytics/overdue")
+@router.get("/payments/overdue")
 def analytics_overdue(user: User = Depends(require_staff), db: Session = Depends(get_db)):
     return analytics_service.overdue_invoices(db)

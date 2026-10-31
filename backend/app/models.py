@@ -408,3 +408,11 @@ class EmailLog(Base):
     body: Mapped[str] = mapped_column(Text)
     delivered: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class SystemSetting(Base):
+    """Dynamic configuration settings stored in the database."""
+    __tablename__ = "system_settings"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

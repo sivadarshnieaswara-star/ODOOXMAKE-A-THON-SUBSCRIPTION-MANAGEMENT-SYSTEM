@@ -25,9 +25,7 @@ def genesis(sub: Subscription) -> str:
 
 def entry_hash(e: BlackBoxEntry) -> str:
     payload = json.dumps([e.subscription_id, e.seq, e.occurred_on.isoformat(), e.recorded_at.isoformat(timespec="microseconds"),
-                          e.event_type, e.actor_email, e.summary,
-                          # always a float: a whole-number price (195) and its stored form (195.0) must hash the same
-                          None if e.amount is None else float(round(e.amount, 2)),
+                          e.event_type, e.actor_email, e.summary, None if e.amount is None else round(e.amount, 2),
                           e.data_json, bool(e.internal), e.prev_hash], separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
 
@@ -45,7 +43,7 @@ def record(sub: Subscription, event_type: str, summary: str, *, actor: User | No
                      .order_by(BlackBoxEntry.seq.desc()).limit(1))
     e = BlackBoxEntry(subscription_id=sub.id, seq=(last.seq + 1) if last else 1, occurred_on=on or date.today(),
                       recorded_at=_now(), event_type=event_type, actor_email=actor.email if actor else "system",
-                      summary=summary[:500], amount=None if amount is None else float(round(amount, 2)),
+                      summary=summary[:500], amount=None if amount is None else round(amount, 2),
                       data_json=json.dumps(data or {}, sort_keys=True, default=str), internal=internal,
                       prev_hash=last.hash if last else genesis(sub))
     e.hash = entry_hash(e)

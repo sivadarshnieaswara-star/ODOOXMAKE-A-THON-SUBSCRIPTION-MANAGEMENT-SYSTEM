@@ -1,0 +1,33 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": null,
+  "phases": [
+    {
+      "number": "1",
+      "name": "Foundation, Auth, RBAC & Product Catalog",
+      "status": "in_progress"
+    },
+    {
+      "number": "2",
+      "name": "Plans, Quotations & Subscription Lifecycle",
+      "status": "pending"
+    },
+    {
+      "number": "3",
+      "name": "Automated Recurring Billing, Taxes & Discounts",
+      "status": "pending"
+    },
+    {
+      "number": "4",
+      "name": "Payments, Customer Portal & Finance Analytics Dashboard",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "/gsd-debug",
+    "label": "Debug the blocker",
+    "reason": "Blocked · 1 blocker(s) — resolve before continuing"
+  },
+  "updated_at": "2026-10-31T04:16:50.361Z"
+}

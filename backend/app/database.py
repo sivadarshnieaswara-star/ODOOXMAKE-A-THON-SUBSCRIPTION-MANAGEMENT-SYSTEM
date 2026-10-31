@@ -47,3 +47,17 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def init_db(reset: bool = False):
+    """Create all database tables, applying column migrations."""
+    if reset:
+        Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    return add_missing_columns(engine)
+
+
+if __name__ == "__main__":
+    print("Building database schema...")
+    migrations = init_db()
+    print(f"Database schema built successfully. Migrations applied: {len(migrations)}")

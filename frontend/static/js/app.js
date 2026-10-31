@@ -455,7 +455,7 @@ const STAFF_NAV = [
   ['Records'], ['customers', 'Customers', 'users'], ['products', 'Products', 'package'], ['plans', 'Plans', 'calendar-clock'],
   ['taxes', 'Taxes', 'percent'], ['discounts', 'Discounts', 'badge-percent'],
 ];
-const ADMIN_NAV = [['Admin'], ['staff', 'Staff', 'user-cog'], ['outbox', 'Email outbox', 'mail']];
+const ADMIN_NAV = [['Admin'], ['staff', 'Staff', 'user-cog'], ['outbox', 'Email outbox', 'mail'], ['settings', 'Mail Settings', 'settings']];
 const CUSTOMER_NAV = [['my-subscriptions', 'My subscriptions'], ['timeline', 'Timeline'], ['guardian', 'Price guardian'],
   ['passes', 'QR passes'], ['my-invoices', 'Invoices'], ['my-payments', 'Payments'], ['subscribe', 'Subscribe'], ['profile', 'Profile']];
 
@@ -530,7 +530,7 @@ function renderShell() {
 const VIEWS = {
   dashboard: viewDashboard, forecast: viewForecast, recommendations: viewRecommendations, subscriptions: viewSubscriptions, templates: viewTemplates, invoices: viewInvoices,
   payments: viewPayments, customers: viewCustomers, products: viewProducts, plans: viewPlans, taxes: viewTaxes,
-  discounts: viewDiscounts, staff: viewStaff, outbox: viewOutbox,
+  discounts: viewDiscounts, staff: viewStaff, outbox: viewOutbox, settings: viewSettings,
   'my-subscriptions': viewMySubscriptions, 'my-invoices': viewMyInvoices, 'my-payments': viewMyPayments,
   timeline: viewTimeline, guardian: viewGuardian, passes: viewPasses,
   subscribe: viewSubscribe, profile: viewProfile,
@@ -1618,6 +1618,91 @@ async function viewOutbox(main) {
       <span class="text-xs text-gray-400 ml-auto">${new Date(m.created_at + 'Z').toLocaleString()} · ${m.delivered ? 'delivered' : 'logged only'}</span></summary>
       <pre class="whitespace-pre-wrap text-sm mt-3 text-gray-700 font-sans">${esc(m.body).replace(/(https?:\/\/\S+)/g, '<a class="text-odoo underline break-all" href="$1" target="_blank">$1</a>')}</pre></details>`).join('')
       || '<div class="card p-10 text-center text-gray-400">No emails yet.</div>'}</div>`;
+}
+
+
+async function viewSettings(main) {
+  const s = await api('/settings/mail');
+  main.innerHTML = pageHeader('Mail Settings', 'Configure dynamic email routing, dummy mail redirection, and live SMTP test delivery.', '', 'Admin \u2022 Mail Settings') + `
+    <div class="grid gap-6 max-w-4xl">
+      <div class="card p-6">
+        <div class="flex items-center justify-between border-b pb-4 mb-4">
+          <div>
+            <h3 class="font-semibold text-lg text-slate-900">SMTP Server Status</h3>
+            <p class="text-sm text-slate-500">Live outgoing email transport configuration</p>
+          </div>
+          <span class="badge ${s.smtp_configured ? 'b-emerald' : 'b-amber'} font-medium">
+            ${s.smtp_configured ? 'Active & Configured' : 'Offline Mode (Outbox Only)'}
+          </span>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-4 text-sm">
+          <div><span class="text-slate-500">Host:</span> <code class="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded">${esc(s.smtp_host)}</code></div>
+          <div><span class="text-slate-500">Port:</span> <code class="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded">${esc(s.smtp_port)}</code></div>
+          <div><span class="text-slate-500">Sender Address:</span> <code class="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded">${esc(s.smtp_from)}</code></div>
+          <div><span class="text-slate-500">Security:</span> <span class="text-slate-700">TLS Enabled</span></div>
+        </div>
+      </div>
+
+      <div class="card p-6">
+        <h3 class="font-semibold text-lg text-slate-900 mb-1">Dummy Email Redirection</h3>
+        <p class="text-sm text-slate-500 mb-4">Route all emails generated for dummy accounts (Acme, Globex, etc.) to your real inbox so you receive all invoices, reminders, and notices without fake address bounces.</p>
+        <form id="mail-routing-form" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Target / Real Email Address</label>
+            <input type="email" name="target_email" value="${esc(s.target_email || '')}" required class="input max-w-md w-full" placeholder="you@domain.com">
+            <p class="text-xs text-slate-400 mt-1">All simulated customer emails will forward to this inbox.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="checkbox" id="redirect_dummy" name="redirect_dummy" ${s.redirect_dummy ? 'checked' : ''} class="rounded text-brand focus:ring-brand">
+            <label for="redirect_dummy" class="text-sm font-medium text-slate-700">Enable automatic dummy email redirection</label>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="btn btn-primary">Save Routing Preferences</button>
+            <button type="button" id="btn-update-customers" class="btn btn-light">Apply to All Customer Accounts</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card p-6">
+        <h3 class="font-semibold text-lg text-slate-900 mb-1">Diagnostic Dispatch</h3>
+        <p class="text-sm text-slate-500 mb-4">Send a live test email through the server's SMTP pipeline right now.</p>
+        <form id="mail-test-form" class="flex flex-wrap gap-3 items-end">
+          <div class="flex-1 min-w-[240px]">
+            <label class="block text-sm font-medium text-slate-700 mb-1">Recipient</label>
+            <input type="email" name="test_to" value="${esc(s.target_email || '')}" required class="input w-full" placeholder="recipient@example.com">
+          </div>
+          <button type="submit" class="btn btn-brand">Send Test Email</button>
+        </form>
+      </div>
+    </div>
+  `;
+
+  $('#mail-routing-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const target_email = e.target.target_email.value.trim();
+    const redirect_dummy = e.target.redirect_dummy.checked;
+    await api('/settings/mail', { method: 'POST', body: { target_email, redirect_dummy } });
+    toast('Mail settings saved successfully');
+    viewSettings(main);
+  });
+
+  $('#btn-update-customers').addEventListener('click', async () => {
+    const target_email = $('#mail-routing-form').target_email.value.trim();
+    if (!target_email) return alert('Please enter a target email first');
+    if (!confirm(`Update all customer accounts in the database to receive billing emails at ${target_email}?`)) return;
+    const r = await api('/settings/update-customer-emails', { method: 'POST', body: { target_email } });
+    toast(r.message);
+  });
+
+  $('#mail-test-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const to_email = e.target.test_to.value.trim();
+    const r = await api('/emails/test', {
+      method: 'POST',
+      body: { to_email, subject: 'Brightloop Mail Diagnostic Check', body: 'This test confirms that your Brightloop transactional email pipeline is operating cleanly.' }
+    });
+    toast(r.delivered ? `Delivered to ${to_email} over SMTP!` : `Logged in outbox (SMTP offline)`);
+  });
 }
 
 // ---------- customer window: timeline ----------

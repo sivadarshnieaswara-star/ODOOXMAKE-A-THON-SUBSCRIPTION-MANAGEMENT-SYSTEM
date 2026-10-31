@@ -186,3 +186,21 @@ def seed_demo(db: Session, today: date | None = None) -> None:
     from .services.customer_features import schedule_price_change
     schedule_price_change(db, crm, 49, today + timedelta(days=30), "Annual list price review", admin, today=today)
     db.commit()
+
+
+if __name__ == "__main__":
+    from .database import Base, SessionLocal, add_missing_columns, engine
+    from .services.blackbox import backfill_missing
+
+    print("Initializing database tables...")
+    Base.metadata.create_all(engine)
+    add_missing_columns(engine)
+    with SessionLocal() as db:
+        print("Bootstrapping admin user...")
+        bootstrap_admin(db)
+        print("Seeding demo data...")
+        seed_demo(db)
+        print("Backfilling blackbox audit chains...")
+        backfill_missing(db)
+        db.commit()
+    print("Database build and seed complete!")

@@ -1,11 +1,12 @@
+"""Shared utilities for Brightloop services."""
+
 import logging
-import smtplib
-from email.message import EmailMessage
+from typing import Any, Sequence
 
 from sqlalchemy.orm import Session
 
-from .. import config
 from ..models import Counter, EmailLog
+from .mail_service import send_email as _mail_service_send_email
 
 log = logging.getLogger("brightloop")
 
@@ -23,22 +24,20 @@ def next_number(db: Session, kind: str) -> str:
     return f"{PREFIXES[kind]}-{counter.value:05d}"
 
 
-def send_email(db: Session, to: str, subject: str, body: str) -> EmailLog:
-    """Record the email in the outbox and deliver it over SMTP when configured."""
-    entry = EmailLog(to_email=to, subject=subject, body=body, delivered=False)
-    if config.SMTP_HOST:
-        try:
-            msg = EmailMessage()
-            msg["From"], msg["To"], msg["Subject"] = config.SMTP_FROM, to, subject
-            msg.set_content(body)
-            with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=10) as smtp:
-                smtp.starttls()
-                if config.SMTP_USER:
-                    smtp.login(config.SMTP_USER, config.SMTP_PASSWORD or "")
-                smtp.send_message(msg)
-            entry.delivered = True
-        except Exception:  # delivery failure must not break the business action
-            log.exception("SMTP delivery to %s failed", to)
-    log.info("EMAIL to=%s subject=%s\n%s", to, subject, body)
-    db.add(entry)
-    return entry
+def send_email(
+    db: Session,
+    to: str,
+    subject: str,
+    body: str,
+    html_body: str | None = None,
+    attachments: Sequence[dict[str, Any]] | None = None,
+) -> EmailLog:
+    """Delegate to the central Brightloop mail service with outbox recording and SMTP delivery."""
+    return _mail_service_send_email(
+        db=db,
+        to=to,
+        subject=subject,
+        body=body,
+        html_body=html_body,
+        attachments=attachments,
+    )

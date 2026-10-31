@@ -57,4 +57,9 @@ def pass_page(token: str, db: Session = Depends(get_db)):
 
 @app.get("/api/health", tags=["meta"])
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "healthy",
+        "company": "Brightloop Software",
+        "platform": "Subscription Management System",
+        "version": "1.0.0"
+    }

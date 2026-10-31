@@ -235,7 +235,7 @@ function saveSession(r) {
   localStorage.setItem('bl_user', JSON.stringify(S.user));
 }
 function logout() {
-  S.token = null; S.user = null; S.cache = {};
+  S.token = null; S.user = null; S.cache = {}; S.introDone = true;
   localStorage.removeItem('bl_token'); localStorage.removeItem('bl_user');
   location.hash = '';
   render();
@@ -263,6 +263,52 @@ const DEMO = [
   ['Customer · Acme', 'acme@corp.com', 'CustomerPass#2026', 'b-customer'],
   ['Customer · Retail shop', 'retail@shop.com', 'CustomerPass#2026', 'b-customer'],
 ];
+
+// ---------- intro screen ----------
+// Shown once per visit before the login page; any key, click or tap moves on.
+const INTRO_CARDS = [
+  ['ic-plum', 'MRR', '$48,260', '↑ 12% this month', 'bars'], ['ic-paper', 'Invoice', 'INV-00042', '✓ Paid via UPI'],
+  ['ic-teal', 'Billing run', '128', 'invoices created · 0 duplicates'], ['ic-ink', 'Subscription', 'SUB-00017', 'Active · billed monthly'],
+  ['ic-sand', 'Variant', '+560', 'Odoo Brand Edition'], ['ic-rose', 'Overdue', '3', 'on the chase list'],
+  ['ic-grey', 'Quotation', 'Sent', 'valid for 30 days'], ['ic-paper', 'ARR', '$579k', 'across 4 plans', 'bars'],
+  ['ic-plum', 'Discount', 'SEATS10', '−10% on 10+ seats'], ['ic-teal', 'Payment', '$1,681.50', 'Bank transfer · matched'],
+  ['ic-ink', 'brightloop.', '', 'subscriptions, billed right'], ['ic-sand', 'Tax', 'GST 18%', 'applied automatically'],
+];
+function introCard([cls, k, v, sub, extra]) {
+  const bars = extra === 'bars' ? `<div class="intro-bars">${[30, 45, 38, 60, 52, 75, 90].map(h => `<span style="height:${h}%"></span>`).join('')}</div>` : '';
+  return `<div class="intro-card ${cls}"><div class="k">${k}</div>${bars}<div><div class="v">${v}</div><div class="s">${sub}</div></div></div>`;
+}
+function renderIntro() {
+  // 5 columns, each a shuffled copy of the deck repeated twice so the drift loops seamlessly.
+  const cols = [0, 1, 2, 3, 4].map(c => {
+    const deck = INTRO_CARDS.map((_, i) => INTRO_CARDS[(i * 5 + c * 3) % INTRO_CARDS.length]).slice(0, 6);
+    return `<div class="intro-col">${[...deck, ...deck].map(introCard).join('')}</div>`;
+  }).join('');
+  const el = document.createElement('div');
+  el.className = 'intro';
+  el.innerHTML = `<div class="intro-stage"><div class="intro-wall">${cols}</div></div><div class="intro-shade"></div>
+    <div class="intro-copy">
+      <div class="flex items-center justify-between intro-rise">
+        <span class="text-2xl font-bold tracking-tight">brightloop<span class="opacity-60">.</span></span>
+        <span class="text-xs font-semibold uppercase tracking-[0.2em] text-white/50">Odoo × Make-A-Thon</span></div>
+      <div><h1 class="intro-title intro-rise" style="animation-delay:.1s">Recurring revenue <em>you can trust.</em></h1>
+        <p class="mt-6 max-w-md text-lg text-white/70 intro-rise" style="animation-delay:.2s">Plans, subscriptions, invoices and payments for Brightloop Software, in one place.</p></div>
+      <div class="intro-hint intro-rise" style="animation-delay:.35s"><span class="intro-pulse"></span>
+        Press <kbd>any key</kbd> or click to sign in</div></div>`;
+  document.body.appendChild(el);
+  let gone = false;
+  const leave = e => {
+    if (gone || (e.type === 'keydown' && ['Shift', 'Control', 'Alt', 'Meta'].includes(e.key))) return;
+    gone = true;
+    window.removeEventListener('keydown', leave);
+    S.introDone = S.fromIntro = true;
+    renderAuth();                 // login renders underneath while the overlay animates away
+    el.classList.add('leaving');
+    setTimeout(() => { el.remove(); S.fromIntro = false; }, 1100);
+  };
+  window.addEventListener('keydown', leave);
+  el.addEventListener('pointerdown', leave);
+}
 
 function renderAuth(mode = 'login') {
   const resetToken = new URLSearchParams(location.search).get('reset_token');
@@ -293,8 +339,8 @@ function renderAuth(mode = 'login') {
       <div>${field({ name: 'new_password', label: 'New password', type: 'password', required: true })}<p class="text-xs mt-1" id="pwh"></p></div>
       <button class="btn btn-primary w-full justify-center">Set new password</button></form>`;
 
-  $('#app').innerHTML = `<div class="min-h-screen grid lg:grid-cols-2">
-    <div class="hidden lg:flex bg-odoo text-white p-12 flex-col justify-between">
+  $('#app').innerHTML = `<div class="min-h-screen grid lg:grid-cols-2 ${S.fromIntro ? 'auth-enter' : ''}">
+    <div class="hidden lg:flex text-white p-12 flex-col justify-between" style="background:linear-gradient(160deg, var(--brand-900), var(--night))">
       <div class="text-2xl font-bold tracking-tight">brightloop<span class="opacity-60">.</span></div>
       <div><h1 class="text-4xl font-semibold leading-tight">Plans, subscriptions and recurring billing in one place.</h1>
         <ul class="mt-8 space-y-3 text-white/85 text-sm">
@@ -423,7 +469,10 @@ const VIEWS = {
 const CUSTOMER_VIEWS = new Set(CUSTOMER_NAV.map(n => n[0]));
 
 async function render() {
-  if (!S.token || !S.user) return renderAuth();
+  if (!S.token || !S.user) {
+    const resetLink = new URLSearchParams(location.search).has('reset_token');
+    return S.introDone || resetLink ? renderAuth() : renderIntro();
+  }
   renderShell();
   const r = route();
   let view = VIEWS[r.name];

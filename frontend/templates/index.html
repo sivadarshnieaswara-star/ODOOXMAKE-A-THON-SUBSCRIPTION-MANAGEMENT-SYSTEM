@@ -8,28 +8,38 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script>
+    // Apply the saved theme (or the OS preference) before anything paints, so there's no flash.
+    try {
+      const t = localStorage.getItem('bl_theme');
+      if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.classList.add('dark');
+    } catch (_) { /* storage blocked: stay light */ }
+  </script>
+  <script>
     // Design tokens: warm-grey neutrals with Brightloop purple as the brand accent.
     const v = n => `var(--${n})`;
     tailwind.config = {
+      darkMode: 'class',
       theme: {
         extend: {
           fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'], display: ['"Cormorant Garamond"', 'Georgia', 'serif'] },
           colors: {
             brand: { 50: v('brand-50'), 100: v('brand-100'), 500: v('brand-500'), 600: v('brand-600'), 700: v('brand-700'), 800: v('brand-800'), 900: v('brand-900') },
             slate: { 50: v('slate-50'), 100: v('slate-100'), 200: v('slate-200'), 300: v('slate-300'), 400: v('slate-400'), 500: v('slate-500'), 600: v('slate-600'), 700: v('slate-700'), 800: v('slate-800'), 900: v('slate-900') },
+            gray: { 50: v('slate-50'), 100: v('slate-100'), 200: v('slate-200'), 300: v('slate-300'), 400: v('slate-400'), 500: v('slate-500'), 600: v('slate-600'), 700: v('slate-700'), 800: v('slate-800'), 900: v('slate-900') },
             ink: v('ink'), surface: v('surface'), night: v('night'),
           },
+          borderColor: { DEFAULT: v('slate-200') },
         },
       },
     };
   </script>
   <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
-  <link rel="stylesheet" href="/static/css/styles.css?v=1.5.1">
+  <link rel="stylesheet" href="/static/css/styles.css?v=1.6.1">
 </head>
 <body class="min-h-screen bg-slate-50 font-sans text-ink antialiased">
   <div id="app"></div>
   <div id="modal-root"></div>
   <div id="toast"></div>
-  <script src="/static/js/app.js?v=1.5.1"></script>
+  <script src="/static/js/app.js?v=1.6.1"></script>
 </body>
 </html>

@@ -67,6 +67,19 @@ function toast(msg, kind = 'ok') {
   setTimeout(() => el.remove(), kind === 'error' ? 6000 : 4500);
 }
 
+// ---------- theme ----------
+const isDark = () => document.documentElement.classList.contains('dark');
+function setTheme(dark) {
+  document.documentElement.classList.toggle('dark', dark);
+  try { localStorage.setItem('bl_theme', dark ? 'dark' : 'light'); } catch (_) { /* not persisted */ }
+  $$('[data-theme-toggle]').forEach(b => { b.innerHTML = themeIcon(); b.title = dark ? 'Switch to light mode' : 'Switch to dark mode'; });
+}
+const themeIcon = () => `<i data-lucide="${isDark() ? 'sun' : 'moon'}" class="h-4 w-4"></i>`;
+function themeButton(cls = '') {
+  return `<button type="button" data-theme-toggle class="${cls}" title="${isDark() ? 'Switch to light mode' : 'Switch to dark mode'}" aria-label="Toggle dark mode">${themeIcon()}</button>`;
+}
+document.addEventListener('click', e => { if (e.target.closest('[data-theme-toggle]')) setTheme(!isDark()); });
+
 // ---------- icons & glow ----------
 const icon = (name, cls = '') => `<i data-lucide="${name}" class="${cls}"></i>`;
 // Swap <i data-lucide> placeholders for SVGs whenever new markup lands in the page.
@@ -468,6 +481,7 @@ function renderShell() {
           <div class="flex items-center gap-3 shrink-0">
             <div class="text-right leading-tight hidden md:block"><div class="text-sm font-medium">${esc(S.user.name)}</div>
               <div class="text-xs text-white/70">${esc(S.user.email)}</div></div>
+            ${themeButton('grid h-8 w-8 place-items-center rounded-lg text-white/80 hover:bg-white/10 hover:text-white')}
             <span class="badge bg-white/20 text-white">${S.user.role}</span>
             <button class="btn btn-sm bg-white/10 text-white hover:bg-white/20" data-logout>Sign out</button></div></div></header>
       <main id="main" class="max-w-[1400px] mx-auto p-4 md:p-6"></main>`;
@@ -481,7 +495,7 @@ function renderShell() {
       ${nav.map(([k, t, ic, step]) => !t ? `<div class="side-group">${k}</div>` :
         `<a href="#/${k}" class="side-link ${r.name === k ? 'active' : ''}">${icon(ic)}<span class="flex-1">${t}</span>
           ${k === 'invoices' ? '<span id="nav-overdue"></span>' : ''}${step ? `<span class="step">${step}</span>` : ''}</a>`).join('')}
-      <div class="mt-auto pt-4"><div class="rounded-xl bg-white/10 p-3 text-xs text-brand-100">
+      <div class="mt-auto pt-4"><div class="rounded-xl bg-white/10 p-3 text-xs text-[#ead8e4]">
         <div class="flex items-center gap-2.5">
           <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/15 ring-2 ring-white/20 text-sm font-bold text-white">${esc(initials)}</span>
           <span class="min-w-0"><span class="block truncate font-semibold text-white">${esc(S.user.name)}</span>
@@ -490,14 +504,15 @@ function renderShell() {
           <span id="live-text">Connecting…</span></div>
         <div class="mt-3 flex items-center justify-between">
           <button data-logout class="flex items-center gap-1.5 font-semibold text-white/90 hover:text-white">${icon('log-out', 'h-3.5 w-3.5')} Sign out</button>
-          <span class="badge ${S.user.role === 'admin' ? 'bg-white/20 text-white' : 'b-staff'}">${S.user.role}</span></div></div></div></nav>`;
+          <span class="flex items-center gap-2">${themeButton('grid h-7 w-7 place-items-center rounded-lg text-white/80 hover:bg-white/10 hover:text-white')}
+          <span class="badge ${S.user.role === 'admin' ? 'bg-white/20 text-white' : 'b-staff'}">${S.user.role}</span></span></div></div></div></nav>`;
   $('#app').innerHTML = `<div class="min-h-screen lg:pl-64">
     <aside class="fixed inset-y-0 left-0 z-30 hidden w-64 lg:block" style="background:linear-gradient(to bottom, var(--brand-900), var(--night))">${sidebar}</aside>
     <div id="drawer" class="fixed inset-0 z-40 hidden lg:hidden"><div class="absolute inset-0 bg-black/40" data-close-drawer></div>
       <aside class="absolute inset-y-0 left-0 w-64" style="background:linear-gradient(to bottom, var(--brand-900), var(--night))">
         <button class="absolute right-3 top-4 text-white" data-close-drawer aria-label="Close menu">${icon('x')}</button>${sidebar}</aside></div>
-    <header class="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur lg:hidden">
-      <button id="open-drawer" aria-label="Open menu">${icon('menu')}</button>${logo(false)}</header>
+    <header class="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-surface px-4 py-3 lg:hidden">
+      <button id="open-drawer" aria-label="Open menu">${icon('menu')}</button>${logo(false)}${themeButton('ml-auto grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100')}</header>
     <main id="main" class="mx-auto max-w-7xl px-4 py-8 sm:px-8"></main></div>`;
   $$('[data-logout]').forEach(b => b.addEventListener('click', logout));
   $('#open-drawer').addEventListener('click', () => $('#drawer').classList.remove('hidden'));
@@ -837,7 +852,7 @@ async function viewSubscriptionDetail(main, id) {
         ].map(([k, v]) => `<div class="flex justify-between gap-4"><span class="text-gray-500">${k}</span><span class="text-right">${v}</span></div>`).join('')}
         ${sub.notes ? `<div class="pt-2 border-t text-gray-600">${esc(sub.notes)}</div>` : ''}</div>
         <div class="card p-4"><h3 class="font-semibold mb-3">History</h3><ol class="space-y-3 text-sm">
-          ${sub.events.slice().reverse().map(e => `<li class="flex gap-3"><span class="mt-1.5 w-2 h-2 rounded-full bg-[#714B67] shrink-0"></span>
+          ${sub.events.slice().reverse().map(e => `<li class="flex gap-3"><span class="mt-1.5 w-2 h-2 rounded-full bg-brand-600 shrink-0"></span>
             <div><div><b class="capitalize">${label(e.action)}</b> → ${badge(e.to_status)}</div>
             <div class="text-xs text-gray-500">${new Date(e.created_at + 'Z').toLocaleString()} · ${esc(e.actor_email)}</div></div></li>`).join('')}</ol></div></div></div>`;
   $$('[data-act]', main).forEach(b => b.addEventListener('click', () => doSubAction(sub, b.dataset.act)));

@@ -7,6 +7,7 @@
   --brand-700: #714B67;
   --brand-800: #4a2f43;
   --brand-900: #2a1826;
+  --brand-solid: #714B67;   /* filled buttons/headers: stays purple in both themes */
   --night: #17121a;
   --ink: #17181a;
   --surface: #ffffff;
@@ -28,7 +29,7 @@
 body { background: var(--slate-50); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
 
 /* legacy helpers still used by a few views */
-.bg-odoo { background: var(--brand-700); }
+.bg-odoo { background: var(--brand-solid); }
 .text-odoo { color: var(--brand-700); }
 .text-teal { color: var(--teal); }
 
@@ -37,7 +38,7 @@ body { background: var(--slate-50); color: var(--ink); font-family: Inter, ui-sa
        font-size: .875rem; font-weight: 600; border: 1px solid transparent; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn svg { width: 1rem; height: 1rem; }
-.btn-primary { background: var(--brand-700); color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.btn-primary { background: var(--brand-solid); color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
 .btn-primary:hover { background: var(--brand-800); }
 .btn-teal { background: var(--teal); color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
 .btn-teal:hover { filter: brightness(.92); }
@@ -108,7 +109,7 @@ table.tbl tr.clickable:hover td { background: color-mix(in srgb, var(--slate-50)
 .b-paused, .b-teal { background: var(--brand-50); color: var(--brand-700); box-shadow: inset 0 0 0 1px var(--brand-100); }
 .b-closed, .b-cancelled, .b-red { background: #fff1f2; color: #be123c; box-shadow: inset 0 0 0 1px #fecdd3; }
 .b-overdue { background: #e11d48; color: #fff; }
-.b-admin { background: var(--brand-700); color: #fff; }
+.b-admin { background: var(--brand-solid); color: #fff; }
 .b-staff { background: var(--teal); color: #fff; }
 .b-customer { background: var(--slate-200); color: var(--slate-700); }
 .dot { width: .375rem; height: .375rem; border-radius: 999px; background: currentColor; }
@@ -140,7 +141,7 @@ table.tbl tr.clickable:hover td { background: color-mix(in srgb, var(--slate-50)
                  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%, 10px 50%); text-transform: capitalize; }
 .pipeline span:first-child { clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%); }
 .pipeline span.done { background: var(--brand-50); color: var(--brand-700); }
-.pipeline span.current { background: var(--brand-700); color: #fff; font-weight: 600; }
+.pipeline span.current { background: var(--brand-solid); color: #fff; font-weight: 600; }
 
 /* Small KPI tiles (billing run summary etc.) */
 .kpi { padding: 1rem 1.1rem; }
@@ -233,3 +234,50 @@ header nav::-webkit-scrollbar { height: 0; }
   background: linear-gradient(0deg, #0d0a0f, transparent); }
 .auth-card { background: var(--surface); color: var(--ink); border-radius: 1.25rem; padding: 2rem;
   box-shadow: 0 30px 80px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.06); }
+
+
+/* ---------- Dark mode: remap tokens, then patch the few hard-coded colours ---------- */
+.dark {
+  color-scheme: dark;
+  --ink: #ecebe8;
+  --surface: #1b181d;
+  --slate-50: #121014;
+  --slate-100: #221e24;
+  --slate-200: #2e2a31;
+  --slate-300: #3e3942;
+  --slate-400: #6f6a75;
+  --slate-500: #9893a0;
+  --slate-600: #b6b1bc;
+  --slate-700: #cfcad3;
+  --slate-800: #e2dee5;
+  --slate-900: #ecebe8;
+  --brand-50: #2e1f2b;
+  --brand-100: #46303f;
+  --brand-500: #b886a9;
+  --brand-600: #a77598;
+  --brand-700: #dcb3d0;      /* brand as text: lightened for contrast */
+  --brand-800: #5e3d55;
+  --brand-solid: #8a5a7d;
+  --series-invoiced: #4a4450;
+  --series-collected: #c48fb6;
+}
+.dark body { background: var(--slate-50); }
+.dark .card, .dark .glow-card .inner { box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.dark .glow-card .inner { box-shadow: 0 0 0 1px var(--slate-200); }
+.dark .btn-primary:hover { background: #9c6a8e; }
+.dark .btn-danger { color: #fda4af; border-color: #5b2330; }
+.dark .btn-danger:hover { background: #2b1419; }
+.dark .tone-red { background: #3a1820; color: #fb7185; }
+.dark .tone-amber { background: #35270f; color: #fbbf24; }
+.dark .tone-green { background: #10291f; color: #34d399; }
+.dark .tone-blue { background: #0f2433; color: #38bdf8; }
+.dark .b-quotation, .dark .b-amber { background: #35270f; color: #fcd34d; box-shadow: inset 0 0 0 1px #5c4413; }
+.dark .b-confirmed, .dark .b-blue { background: #0f2433; color: #7dd3fc; box-shadow: inset 0 0 0 1px #1d4560; }
+.dark .b-active, .dark .b-paid, .dark .b-green { background: #10291f; color: #6ee7b7; box-shadow: inset 0 0 0 1px #1d4d39; }
+.dark .b-closed, .dark .b-cancelled, .dark .b-red { background: #3a1820; color: #fda4af; box-shadow: inset 0 0 0 1px #5b2330; }
+.dark .text-red-700, .dark .text-red-600, .dark .text-red-500 { color: #fb7185; }
+.dark #toast > div { box-shadow: 0 10px 25px rgba(0,0,0,.5); }
+.dark #toast > div.error { border-color: #5b2330; }
+.dark .modal-bg { background: rgba(0,0,0,.6); }
+.dark .auth-card { box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px var(--slate-200); }
+.dark input[type="checkbox"] { accent-color: var(--brand-500); }

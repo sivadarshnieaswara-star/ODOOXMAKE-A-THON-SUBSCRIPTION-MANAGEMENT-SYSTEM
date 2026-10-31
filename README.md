@@ -72,6 +72,16 @@ portal (the checkout is simulated, no real payment gateway).
 a 12 month chart of invoiced vs collected, and a list of overdue invoices with contact details.
 Can be filtered by date, plan and customer.
 
+**Revenue forecast** - a Monte Carlo simulation fitted to the company's own history. It rebuilds
+month-end MRR from every subscription, fits monthly churn (Beta distribution), new deals per month
+(Poisson with a damped trend), deal sizes (resampled from real deals) and the collection rate, then
+simulates a few thousand possible futures. The page shows a fan chart (50% and 90% ranges), the ARR
+distribution, the chance of hitting an ARR target, downside risk, expected cash and written insights,
+including whether cutting churn or winning more deals moves the number more. Sliders let you try
+"what if churn doubles" and similar. The admin can load 18 months of simulated customers (sign-ups,
+churn, renewals, upsells, billing and payments, all run through the normal billing engine) from that
+page so there's enough history to learn from.
+
 ## Folder structure
 
 ```
@@ -80,7 +90,8 @@ backend/app/
   models.py        database tables
   schemas.py       request/response models
   auth.py          passwords, tokens, role checks
-  services/        billing, discounts, taxes, payments, subscriptions, dashboard numbers
+  services/        billing, discounts, taxes, payments, subscriptions, dashboard numbers,
+                   forecast (Monte Carlo) and the simulation data generator
   routers/         API endpoints
   seed_data.py     sample data
 backend/tests/     tests

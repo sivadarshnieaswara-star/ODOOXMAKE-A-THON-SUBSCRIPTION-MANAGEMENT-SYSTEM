@@ -449,7 +449,7 @@ function renderAuth(mode = 'login') {
 // ---------- shell & routing ----------
 // [route, label, icon, flow step]
 const STAFF_NAV = [
-  ['Overview'], ['dashboard', 'Dashboard', 'layout-dashboard'],
+  ['Overview'], ['dashboard', 'Dashboard', 'layout-dashboard'], ['forecast', 'AI revenue forecast', 'sparkles'],
   ['Revenue flow'], ['templates', 'Quotation templates', 'file-text', '01'], ['subscriptions', 'Subscriptions', 'repeat', '02'],
   ['invoices', 'Invoices', 'receipt', '03'], ['payments', 'Payments', 'wallet', '04'],
   ['Records'], ['customers', 'Customers', 'users'], ['products', 'Products', 'package'], ['plans', 'Plans', 'calendar-clock'],
@@ -528,7 +528,7 @@ function renderShell() {
 }
 
 const VIEWS = {
-  dashboard: viewDashboard, subscriptions: viewSubscriptions, templates: viewTemplates, invoices: viewInvoices,
+  dashboard: viewDashboard, forecast: viewForecast, subscriptions: viewSubscriptions, templates: viewTemplates, invoices: viewInvoices,
   payments: viewPayments, customers: viewCustomers, products: viewProducts, plans: viewPlans, taxes: viewTaxes,
   discounts: viewDiscounts, staff: viewStaff, outbox: viewOutbox,
   'my-subscriptions': viewMySubscriptions, 'my-invoices': viewMyInvoices, 'my-payments': viewMyPayments,
@@ -722,6 +722,198 @@ async function viewDashboard(main) {
   $('#dreset').addEventListener('click', () => { S.dash = { date_from: '', date_to: '', plan_id: '', customer_id: '' }; refresh(); });
   $('#run-billing').addEventListener('click', runBillingDialog);
   $('#go-invoices').addEventListener('click', () => { location.hash = '#/invoices'; });
+}
+
+// ---------- revenue forecast (Monte Carlo) ----------
+const FC_DEFAULT = { months: 12, sims: 2000, churn: 1, growth: 1, collection: null, target_arr: '', seed: 42 };
+const compact = v => {
+  const a = Math.abs(v);
+  return (v < 0 ? '-' : '') + (a >= 1e6 ? '$' + (a / 1e6).toFixed(2) + 'M' : a >= 1e3 ? '$' + (a / 1e3).toFixed(a >= 1e5 ? 0 : 1) + 'k' : '$' + Math.round(a));
+};
+const monthShort = m => new Date(m + '-01T00:00:00').toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+
+function fanChart(history, bands) {
+  const hist = history.slice(-13);
+  const W = 760, H = 300, L = 58, R = 16, T = 16, B = 30;
+  const n = hist.length + bands.length;
+  const max = Math.max(1, ...hist.map(h => h.mrr), ...bands.map(b => b.p95)) * 1.06;
+  const x = i => L + (i * (W - L - R)) / (n - 1);
+  const y = v => T + (H - T - B) * (1 - v / max);
+  const start = hist.length - 1, cur = hist[start].mrr;
+  const pts = (arr, key, from) => arr.map((b, i) => `${x(from + i)},${y(b[key])}`);
+  // Polygon: out along the upper percentile, back along the lower one, anchored at today's MRR.
+  const band = (lo, hi) => `M${x(start)},${y(cur)} L${pts(bands, hi, start + 1).join(' L')} L${pts(bands, lo, start + 1).reverse().join(' L')} Z`;
+  const grid = [0, .25, .5, .75, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${y(max * f)}" y2="${y(max * f)}" stroke="var(--slate-200)"/>
+    <text x="${L - 8}" y="${y(max * f) + 4}" font-size="10" text-anchor="end" fill="var(--slate-400)">${compact(max * f)}</text>`).join('');
+  const labels = [...hist.map(h => h.month), ...bands.map(b => b.month)].map((m, i) =>
+    i % 3 === 0 || i === start ? `<text x="${x(i)}" y="${H - 8}" font-size="10" text-anchor="middle" fill="var(--slate-500)">${monthShort(m)}</text>` : '').join('');
+  const histLine = hist.map((h, i) => `${i ? 'L' : 'M'}${x(i)},${y(h.mrr)}`).join(' ');
+  const median = `M${x(start)},${y(cur)} L${pts(bands, 'p50', start + 1).join(' L')}`;
+  const dots = bands.map((b, i) => `<circle cx="${x(start + 1 + i)}" cy="${y(b.p50)}" r="9" fill="transparent">
+    <title>${monthShort(b.month)}: median ${money(b.p50)} MRR · 50% range ${money(b.p25)}–${money(b.p75)} · 90% range ${money(b.p5)}–${money(b.p95)}</title></circle>`).join('');
+  const histDots = hist.map((h, i) => `<circle cx="${x(i)}" cy="${y(h.mrr)}" r="8" fill="transparent"><title>${monthShort(h.month)}: ${money(h.mrr)} MRR · ${h.new_deals} new, ${h.churned_deals} churned</title></circle>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto">${grid}
+    <path d="${band('p5', 'p95')}" fill="var(--brand-500)" opacity=".16"/>
+    <path d="${band('p25', 'p75')}" fill="var(--brand-500)" opacity=".32"/>
+    <line x1="${x(start)}" x2="${x(start)}" y1="${T}" y2="${H - B}" stroke="var(--slate-400)" stroke-dasharray="3 4"/>
+    <text x="${x(start) + 6}" y="${T + 10}" font-size="10" fill="var(--slate-500)">Today</text>
+    <path d="${histLine}" fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="${median}" fill="none" stroke="var(--brand-700)" stroke-width="2.2" stroke-dasharray="6 5"/>
+    ${labels}${histDots}${dots}</svg>`;
+}
+
+function arrHistogram(hist, target, start) {
+  const W = 380, H = 220, L = 8, R = 8, T = 12, B = 34;
+  const max = Math.max(1, ...hist.map(h => h.count));
+  const lo = hist[0].from, hi = hist[hist.length - 1].to;
+  const bw = (W - L - R) / hist.length;
+  const xv = v => L + ((v - lo) / (hi - lo || 1)) * (W - L - R);
+  const bars = hist.map((h, i) => `<rect x="${L + i * bw + 1}" y="${T + (H - T - B) * (1 - h.count / max)}" width="${bw - 2}"
+    height="${(H - T - B) * h.count / max}" rx="2" fill="${h.from >= target ? 'var(--brand-600)' : 'var(--series-invoiced)'}">
+    <title>${compact(h.from)}–${compact(h.to)} ARR: ${h.count} simulations</title></rect>`).join('');
+  const marker = (v, label, color) => v >= lo && v <= hi ? `<line x1="${xv(v)}" x2="${xv(v)}" y1="${T}" y2="${H - B}" stroke="${color}" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <text x="${Math.min(W - 4, Math.max(4, xv(v)))}" y="${T + 9}" font-size="10" text-anchor="${xv(v) > W / 2 ? 'end' : 'start'}" fill="${color}">${label}</text>` : '';
+  return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto">${bars}
+    ${marker(target, ' Target ' + compact(target) + ' ', '#e11d48')}${marker(start, ' Today ' + compact(start) + ' ', 'var(--slate-500)')}
+    <text x="${L}" y="${H - 10}" font-size="10" fill="var(--slate-500)">${compact(lo)}</text>
+    <text x="${W - R}" y="${H - 10}" font-size="10" text-anchor="end" fill="var(--slate-500)">${compact(hi)}</text></svg>`;
+}
+
+const INSIGHT_ICON = { green: ['trending-up', 'green'], red: ['alert-triangle', 'red'], amber: ['alert-circle', 'amber'],
+  blue: ['target', 'blue'], brand: ['zap', 'brand'], slate: ['info', 'brand'] };
+
+async function viewForecast(main) {
+  S.fc = S.fc || { ...FC_DEFAULT };
+  const f = S.fc;
+  main.innerHTML = pageHeader('AI Revenue Forecast',
+    'A Monte Carlo simulation fitted to your own history: churn, new business, deal sizes and collections. Thousands of possible futures, summarised.',
+    `<button class="btn btn-light" id="fc-reset">${icon('rotate-ccw')} Reset</button><button class="btn btn-primary" id="fc-rerun">${icon('dices')} Re-run simulation</button>`,
+    'Forecast · Monte Carlo') + `
+    <div id="fc-callout"></div>
+    <div class="card mb-6 overflow-hidden">
+      <div class="card-head"><div class="t">${icon('sliders-horizontal')} What if…</div><div class="s">Adjust the assumptions; the simulation re-runs instantly</div></div>
+      <form id="fc-form" class="grid gap-x-8 gap-y-5 p-6 sm:grid-cols-2 lg:grid-cols-3">
+        <label class="block"><span class="label flex justify-between">Horizon <b id="fc-months-l"></b></span>
+          <input type="range" name="months" min="3" max="36" step="1" value="${f.months}" class="w-full accent-[var(--brand-600)]"></label>
+        <label class="block"><span class="label flex justify-between">Churn <b id="fc-churn-l"></b></span>
+          <input type="range" name="churn" min="0" max="2" step="0.05" value="${f.churn}" class="w-full accent-[var(--brand-600)]"></label>
+        <label class="block"><span class="label flex justify-between">New business <b id="fc-growth-l"></b></span>
+          <input type="range" name="growth" min="0" max="2" step="0.05" value="${f.growth}" class="w-full accent-[var(--brand-600)]"></label>
+        <label class="block"><span class="label flex justify-between">Collection rate <b id="fc-coll-l"></b></span>
+          <input type="range" name="collection" min="0.5" max="1" step="0.01" value="${f.collection ?? 0.95}" class="w-full accent-[var(--brand-600)]"></label>
+        <label class="block"><span class="label">ARR target</span>
+          <input class="input" type="number" name="target_arr" min="0" step="1000" placeholder="Auto: +25% on today" value="${f.target_arr}"></label>
+        <label class="block"><span class="label">Simulations</span><select class="input" name="sims">
+          ${[500, 1000, 2000, 5000, 10000].map(n => `<option value="${n}" ${n === f.sims ? 'selected' : ''}>${n.toLocaleString()} futures</option>`).join('')}</select></label>
+      </form></div>
+    <div id="fc-results" class="transition-opacity"><div class="flex justify-center py-20"><div class="spinner"></div></div></div>`;
+
+  let model = null, timer = 0, reqId = 0;
+  const labels = () => {
+    const v = readFc();
+    $('#fc-months-l').textContent = `${v.months} months`;
+    $('#fc-churn-l').textContent = `×${v.churn.toFixed(2)}${model ? ` · ${(model.churn_mean * v.churn * 100).toFixed(1)}%/mo` : ''}`;
+    $('#fc-growth-l').textContent = `×${v.growth.toFixed(2)}${model ? ` · ${(model.deals_per_month * v.growth).toFixed(1)} deals/mo` : ''}`;
+    $('#fc-coll-l').textContent = f.collection === null && model ? `fitted ${Math.round(model.collection_rate * 100)}%` : `${Math.round(v.collection * 100)}%`;
+  };
+  const readFc = () => {
+    const fd = new FormData($('#fc-form'));
+    return { months: +fd.get('months'), churn: +fd.get('churn'), growth: +fd.get('growth'), collection: +fd.get('collection'),
+      target_arr: fd.get('target_arr'), sims: +fd.get('sims') };
+  };
+  const load = async () => {
+    const id = ++reqId;
+    $('#fc-results').style.opacity = '.55';
+    const t0 = performance.now();
+    try {
+      const d = await api('/forecast?' + qs({ months: f.months, sims: f.sims, churn: f.churn, growth: f.growth,
+        collection: f.collection ?? '', target_arr: f.target_arr, seed: f.seed }));
+      if (id !== reqId || !$('#fc-results')) return;
+      model = d.model;
+      if (f.collection === null) $('[name=collection]').value = model.collection_rate.toFixed(2);
+      labels();
+      renderForecast(d, Math.round(performance.now() - t0));
+    } catch (e) { toast(e.message, 'error'); }
+    finally { if ($('#fc-results')) $('#fc-results').style.opacity = '1'; }
+  };
+  $('#fc-form').addEventListener('input', e => {
+    if (e.target.name === 'collection') f.collection = +e.target.value;
+    labels();
+  });
+  $('#fc-form').addEventListener('change', () => {
+    const v = readFc();
+    Object.assign(f, { months: v.months, churn: v.churn, growth: v.growth, sims: v.sims, target_arr: v.target_arr });
+    clearTimeout(timer); timer = setTimeout(load, 120);
+  });
+  $('#fc-form').addEventListener('submit', e => e.preventDefault());
+  $('#fc-rerun').addEventListener('click', () => { f.seed = Math.floor(Math.random() * 1e6); load(); });
+  $('#fc-reset').addEventListener('click', () => { S.fc = { ...FC_DEFAULT }; refresh(); });
+  labels();
+  await load();
+}
+
+function renderForecast(d, ms) {
+  const s = d.summary, m = d.model;
+  $('#fc-callout').innerHTML = !d.simulation_data_loaded && isAdmin() ? `
+    <div class="card mb-6 flex flex-wrap items-center gap-4 p-4">
+      <div class="stat-icon tone-amber !mb-0">${icon('flask-conical')}</div>
+      <div class="flex-1 min-w-[240px]"><div class="font-semibold">${m.months_of_history < 6 ? 'Not much history to learn from yet' : 'Want a bigger book to forecast?'}</div>
+        <div class="text-sm text-slate-500">Load 18 months of simulated customers (sign-ups, churn, renewals, upsells, billing and payments) so the model has a realistic history.</div></div>
+      <button class="btn btn-primary" id="fc-sim">${icon('database')} Load simulation data</button></div>` : '';
+  $('#fc-sim')?.addEventListener('click', async e => {
+    e.target.closest('button').disabled = true;
+    e.target.closest('button').innerHTML = '<span class="spinner !h-4 !w-4 !border-2"></span> Simulating 18 months…';
+    try {
+      const r = await api('/forecast/simulation-data', { method: 'POST', body: {} });
+      toast(`Loaded ${r.customers} customers: ${r.churned} churned, ${r.renewed} renewed, ${r.payments} payments`);
+      invalidate('customers'); refresh();
+    } catch (err) { toast(err.message, 'error'); e.target.closest('button').disabled = false; }
+  });
+
+  const tone = s.growth_pct >= 0 ? 'green' : 'red';
+  $('#fc-results').innerHTML = `
+    <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      ${stat('gauge', 'MRR today', money(s.start_mrr), `${compact(s.start_arr)} ARR · ${m.active_customers} customers`)}
+      ${stat('trending-up', `Median MRR in ${d.months} months`, money(s.median_mrr), `${s.growth_pct >= 0 ? '+' : ''}${s.growth_pct ?? 0}% · ${compact(s.median_arr)} ARR`, tone)}
+      ${stat('target', `Chance of ${compact(s.target_arr)} ARR`, `${Math.round(s.p_target * 100)}%`, `${Math.round(s.p_decline * 100)}% chance ARR falls`, 'blue')}
+      ${stat('shield-alert', 'Downside ARR (P5)', compact(s.p5_arr), `Upside (P95) ${compact(s.p95_arr)}`, 'amber')}
+      ${stat('wallet', 'Expected cash', compact(s.expected_cash), `over ${d.months} months at ${Math.round((d.assumptions.collection ?? m.collection_rate) * 100)}% collected`)}
+    </div>
+    <div class="mb-6 grid gap-6 lg:grid-cols-3">
+      <div class="card overflow-hidden lg:col-span-2">
+        <div class="card-head"><div class="t">${icon('area-chart')} MRR: history and ${d.sims.toLocaleString()} simulated futures</div>
+          <div class="ml-auto flex flex-wrap gap-3 text-xs text-slate-500">
+            <span class="flex items-center gap-1.5"><span class="h-0.5 w-4" style="background:var(--ink)"></span>Actual</span>
+            <span class="flex items-center gap-1.5"><span class="h-0.5 w-4 border-t-2 border-dashed" style="border-color:var(--brand-700)"></span>Median</span>
+            <span class="flex items-center gap-1.5"><span class="h-2.5 w-4 rounded-sm" style="background:var(--brand-500);opacity:.45"></span>50%</span>
+            <span class="flex items-center gap-1.5"><span class="h-2.5 w-4 rounded-sm" style="background:var(--brand-500);opacity:.2"></span>90%</span></div></div>
+        <div class="p-4 sm:p-6">${fanChart(d.history, d.bands)}</div></div>
+      <div class="card overflow-hidden">
+        <div class="card-head"><div class="t">${icon('bar-chart-3')} ARR in ${d.months} months</div><div class="s">distribution</div></div>
+        <div class="p-4 sm:p-6">${arrHistogram(d.histogram, s.target_arr, s.start_arr)}
+          <p class="mt-3 text-xs text-slate-500">Each bar counts simulated futures ending in that ARR range. Purple bars reach the target.</p></div></div>
+    </div>
+    <div class="grid gap-6 lg:grid-cols-3">
+      <div class="card overflow-hidden lg:col-span-2">
+        <div class="card-head"><div class="t">${icon('sparkles')} Insights</div><div class="s">Written from this run's numbers</div></div>
+        <div class="grid gap-4 p-6 md:grid-cols-2">${d.insights.map(i => {
+          const [ic, t] = INSIGHT_ICON[i.tone] || INSIGHT_ICON.slate;
+          return `<div class="flex gap-3"><div class="stat-icon tone-${t} !mb-0 h-fit">${icon(ic)}</div>
+            <div><div class="font-semibold text-sm">${esc(i.title)}</div><p class="mt-0.5 text-sm text-slate-600">${esc(i.body)}</p></div></div>`;
+        }).join('')}</div></div>
+      <div class="card overflow-hidden">
+        <div class="card-head"><div class="t">${icon('cpu')} Model</div><div class="s">fitted ${fmtDate(d.as_of)} · ${ms} ms</div></div>
+        <div class="space-y-2.5 p-6 text-sm">
+          ${[['Months of history', m.months_of_history], ['Subscriptions learned from', m.subscriptions_seen],
+             ['Monthly churn', `${(m.churn_mean * 100).toFixed(1)}% ± ${(m.churn_sd * 100).toFixed(1)}`],
+             ['New deals / month', `${m.deals_per_month.toFixed(1)} (${m.deals_trend >= 0 ? '+' : ''}${m.deals_trend.toFixed(2)}/mo trend)`],
+             ['Typical deal', `${money(m.median_deal_mrr)} MRR`], ['Deal sizes resampled', m.deals_sampled],
+             ['Collection rate', `${(m.collection_rate * 100).toFixed(1)}%`], ['Largest customer', `${(m.top_customer_share * 100).toFixed(1)}% of MRR`],
+             ['Futures simulated', d.sims.toLocaleString()], ['Random seed', d.seed]]
+            .map(([k, v]) => `<div class="flex justify-between gap-3"><span class="text-slate-500">${k}</span><span class="text-right font-medium">${v}</span></div>`).join('')}
+          <p class="border-t border-slate-100 pt-3 text-xs text-slate-500">Each future: churn drawn from a Beta distribution, new deals from a Poisson process with a damped trend,
+            deal sizes resampled from real subscriptions, cash = MRR × collection rate.</p></div></div>
+    </div>`;
 }
 
 // ---------- subscriptions ----------

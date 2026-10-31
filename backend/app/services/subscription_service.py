@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..models import (
     Plan, Product, ProductVariant, QuotationTemplate, Subscription, SubscriptionEvent, SubscriptionLine, User,
 )
+from . import blackbox
 from .common import next_number
 from .tax_service import tax_rate_for_product
 
@@ -45,9 +46,30 @@ def build_line(db: Session, product_id: int, variant_id: int | None, quantity: i
                             tax_rate=tax_rate_for_product(db, product))
 
 
-def log_event(sub: Subscription, from_status: str | None, to_status: str, action: str, actor: User | None):
+_EVENT_TEXT = {
+    "send_quotation": ("quotation_sent", "Quotation sent to the customer"), "revert_to_draft": ("reverted_to_draft", "Quotation moved back to draft"),
+    "confirm": ("confirmed", "Quotation confirmed"), "activate": ("activated", "Subscription activated; billing starts"),
+    "self_service": ("self_service", "Customer subscribed online"), "pause": ("paused", "Subscription paused"),
+    "resume": ("resumed", "Subscription resumed"), "auto_resume": ("resumed", "Subscription resumed automatically"),
+    "renew": ("renewed", "Contract renewed"), "close": ("closed", "Subscription closed"),
+    "auto_close": ("closed", "Closed automatically at expiry"), "cancel": ("cancelled", "Subscription cancelled"),
+    "decline": ("declined", "Customer declined the quotation"),
+}
+
+
+def log_event(sub: Subscription, from_status: str | None, to_status: str, action: str, actor: User | None,
+              on: date | None = None, data: dict | None = None):
     sub.events.append(SubscriptionEvent(from_status=from_status, to_status=to_status, action=action,
                                         actor_email=actor.email if actor else "system"))
+    if sub.id is not None and action in _EVENT_TEXT:   # 'create' is recorded once the subscription has an id
+        kind, text = _EVENT_TEXT[action]
+        data = {"from": from_status, "to": to_status, **(data or {})}
+        if action == "pause":
+            text += f" until {data['resume_on']}" if data.get("resume_on") else " until resumed manually"
+            text += f" ({data['reason']})" if data.get("reason") else ""
+        elif action == "renew" and data.get("new_expiry"):
+            text += f"; now runs to {data['new_expiry']}"
+        blackbox.record(sub, kind, text, actor=actor, on=on, data=data)
 
 
 def _check_plan_available(plan: Plan, start: date):
@@ -84,6 +106,11 @@ def create_subscription(db: Session, *, customer_id: int, plan_id: int, start_da
     log_event(sub, None, "draft", "create", actor)
     db.add(sub)
     db.flush()
+    blackbox.record(sub, "created", f"Subscription {sub.subscription_number} created for {customer.company_name or customer.name} "
+                    f"on {plan.name} ({plan.billing_frequency})", actor=actor, on=start_date, amount=sub.recurring_amount,
+                    data={"plan": plan.name, "start": start_date, "expiry": expiry_date, "payment_terms": payment_terms,
+                          "lines": [{"product": l.product.name, "variant": l.variant.label if l.variant else None,
+                                     "qty": l.quantity, "unit_price": l.unit_price, "tax_rate": l.tax_rate} for l in sub.lines]})
     return sub
 
 
@@ -117,6 +144,10 @@ def update_subscription(db: Session, sub: Subscription, data, actor: User) -> Su
     if data.lines is not None:
         sub.lines = [build_line(db, l.product_id, l.variant_id, l.quantity, l.unit_price) for l in data.lines]
     db.flush()
+    blackbox.record(sub, "terms_changed", f"Terms updated: recurring amount now {sub.recurring_amount:,.2f}", actor=actor,
+                    amount=sub.recurring_amount,
+                    data={"start": sub.start_date, "expiry": sub.expiry_date, "payment_terms": sub.payment_terms,
+                          "lines": [{"product": l.product.name, "qty": l.quantity, "unit_price": l.unit_price} for l in sub.lines]})
     return sub
 
 
@@ -207,7 +238,9 @@ def transition(db: Session, sub: Subscription, action: str, actor: User, today: 
         sub.paused_at = sub.resume_on = sub.pause_reason = None
     if target:
         sub.status = target
-    log_event(sub, previous, sub.status, action, actor)
+    extra = {"resume_on": sub.resume_on, "reason": sub.pause_reason} if action == "pause" else \
+            {"new_expiry": sub.expiry_date} if action == "renew" else {}
+    log_event(sub, previous, sub.status, action, actor, on=today, data=extra)
     db.flush()
     return sub
 
@@ -223,9 +256,10 @@ def auto_resume_due(db: Session, today: date) -> int:
     """Resume paused subscriptions whose scheduled resume date has arrived (billed from that date)."""
     subs = db.scalars(select(Subscription).where(Subscription.status == "paused", Subscription.resume_on <= today)).all()
     for sub in subs:
-        _resume(sub, sub.resume_on)
+        resumed_on = sub.resume_on
+        _resume(sub, resumed_on)
         sub.status = "active"
-        log_event(sub, "paused", "active", "auto_resume", None)
+        log_event(sub, "paused", "active", "auto_resume", None, on=resumed_on)
     db.flush()
     return len(subs)
 
@@ -241,6 +275,6 @@ def auto_close_expired(db: Session, today: date) -> int:
         previous = sub.status
         sub.status, sub.closed_at, sub.next_billing_date = "closed", today, None
         sub.paused_at = sub.resume_on = sub.pause_reason = None
-        log_event(sub, previous, "closed", "auto_close", None)
+        log_event(sub, previous, "closed", "auto_close", None, on=today)
     db.flush()
     return len(subs)

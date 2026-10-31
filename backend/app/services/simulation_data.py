@@ -142,7 +142,7 @@ def generate(db: Session, *, months: int = 18, customers: int = 140, seed: int =
                 Subscription.start_date < ms, Subscription.notes == "Simulated customer")).all():
             age = (me.year - sub.start_date.year) * 12 + me.month - sub.start_date.month
             if rng.random() < (0.07 if age <= 3 else 0.028):
-                svc.log_event(sub, "active", "closed", "close", sub.customer)
+                svc.log_event(sub, "active", "closed", "close", sub.customer, on=me)
                 sub.status, sub.closed_at, sub.next_billing_date = "closed", me, None
                 stats["churned"] += 1
             elif rng.random() < 0.035:

@@ -1,10 +1,13 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..auth import get_current_user, require_customer, require_staff
+from ..config import FRONTEND_DIR
 from ..database import get_db
 from ..models import Plan, QuotationTemplate, QuotationTemplateLine, Subscription, User
 from ..schemas import (
@@ -12,7 +15,7 @@ from ..schemas import (
     TemplateUseIn,
 )
 from ..serializers import sub_out, template_out
-from ..services import billing_service
+from ..services import billing_service, blackbox
 from ..services import subscription_service as svc
 
 router = APIRouter(prefix="/api", tags=["subscriptions"])
@@ -84,6 +87,32 @@ def subscription_action(sub_id: int, action: str, data: SubActionIn | None = Non
     sub = svc.transition(db, load_subscription(db, sub_id, user), action, user, resume_on=data.resume_on, reason=data.reason)
     db.commit()
     return sub_out(sub, user)
+
+
+_jinja = Environment(loader=FileSystemLoader(FRONTEND_DIR / "templates"), autoescape=select_autoescape())
+
+
+@router.get("/subscriptions/{sub_id}/blackbox")
+def subscription_blackbox(sub_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """The subscription's flight recorder: every billing event, hash-chained, with a verification result."""
+    sub = load_subscription(db, sub_id, user)
+    customer = user.role == "customer"
+    return {"subscription_number": sub.subscription_number, "verification": blackbox.verify(db, sub),
+            "customer_copy": customer, "entries": [blackbox.entry_out(e) for e in blackbox.entries(db, sub.id, not customer)]}
+
+
+@router.get("/subscriptions/{sub_id}/blackbox/report", response_class=HTMLResponse)
+def subscription_blackbox_report(sub_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    sub = load_subscription(db, sub_id, user)
+    return _jinja.get_template("blackbox_report.html").render(**blackbox.report_data(db, sub, customer_copy=user.role == "customer"))
+
+
+@router.get("/blackbox/verify")
+def verify_all_blackboxes(user: User = Depends(require_staff), db: Session = Depends(get_db)):
+    """Check every subscription's chain; lists any that fail."""
+    results = [(s, blackbox.verify(db, s)) for s in db.scalars(select(Subscription).order_by(Subscription.id))]
+    return {"subscriptions": len(results), "entries": sum(r["entries"] for _, r in results),
+            "broken": [{"subscription_id": s.id, "subscription_number": s.subscription_number, **r} for s, r in results if not r["ok"]]}
 
 
 @router.post("/subscriptions/{sub_id}/bill-now")

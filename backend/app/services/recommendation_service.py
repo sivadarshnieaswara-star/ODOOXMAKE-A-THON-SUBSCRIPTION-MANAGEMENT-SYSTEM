@@ -15,6 +15,7 @@ from ..models import (
 )
 from .analytics_service import MONTHLY_FACTOR
 from .billing_service import confirm_invoice, run_billing
+from . import blackbox
 from .common import send_email
 
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -211,10 +212,12 @@ def build(db: Session, today: date | None = None) -> list[dict]:
 
 
 # ---------- actions ----------
-def _email_subs(db: Session, ids: list[int], subject: str, body) -> int:
+def _email_subs(db: Session, ids: list[int], subject: str, body, actor: User | None = None) -> int:
     n = 0
-    for sub in db.scalars(select(Subscription).where(Subscription.id.in_(ids))):
-        send_email(db, sub.customer.email, subject.format(sub=sub), body(sub))
+    for sub in db.scalars(select(Subscription).where(Subscription.id.in_(ids))).all():
+        text = subject.format(sub=sub)
+        send_email(db, sub.customer.email, text, body(sub))
+        blackbox.record(sub, "outreach_sent", f"Email sent: {text}", actor=actor, data={"to": sub.customer.email}, internal=True)
         n += 1
     return n
 
@@ -228,7 +231,10 @@ def execute(db: Session, rec_key: str, actor: User, autopilot: bool = False, tod
     a, kind = rec["action"], rec["action"]["type"]
     if kind == "send_reminders":
         n = 0
-        for inv in db.scalars(select(Invoice).where(Invoice.id.in_(a["ids"]), Invoice.status == "confirmed")):
+        for inv in db.scalars(select(Invoice).where(Invoice.id.in_(a["ids"]), Invoice.status == "confirmed")).all():
+            blackbox.record(inv.subscription, "reminder_sent", f"Payment reminder sent for {inv.invoice_number} "
+                            f"({(today - inv.due_date).days} days overdue)", actor=actor, amount=inv.balance_due,
+                            data={"invoice": inv.invoice_number, "to": inv.customer.email}, internal=True)
             send_email(db, inv.customer.email, f"Reminder: invoice {inv.invoice_number} is overdue",
                        f"Hello {inv.customer.name},\n\nInvoice {inv.invoice_number} for {inv.balance_due:,.2f} was due on {inv.due_date} "
                        f"and is now {(today - inv.due_date).days} days overdue. You can pay it in your Brightloop customer portal.\n\n"
@@ -237,7 +243,7 @@ def execute(db: Session, rec_key: str, actor: User, autopilot: bool = False, tod
         summary = f"Sent {n} payment reminder{'s' if n != 1 else ''}"
     elif kind == "confirm_drafts":
         n = 0
-        for inv in db.scalars(select(Invoice).where(Invoice.id.in_(a["ids"]), Invoice.status == "draft")):
+        for inv in db.scalars(select(Invoice).where(Invoice.id.in_(a["ids"]), Invoice.status == "draft")).all():
             confirm_invoice(inv)
             n += 1
         summary = f"Confirmed {n} draft invoice{'s' if n != 1 else ''}"
@@ -247,29 +253,29 @@ def execute(db: Session, rec_key: str, actor: User, autopilot: bool = False, tod
     elif kind == "send_renewal_reminders":
         n = _email_subs(db, a["ids"], "Your Brightloop contract {sub.subscription_number} is up for renewal",
                         lambda s: f"Hello {s.customer.name},\n\nYour {s.plan.name} contract ends on {s.expiry_date}. "
-                                  "Reply to this email or renew from your customer portal to keep everything running without a gap.\n\nBrightloop Software")
+                                  "Reply to this email or renew from your customer portal to keep everything running without a gap.\n\nBrightloop Software", actor)
         summary = f"Sent {n} renewal reminder{'s' if n != 1 else ''}"
     elif kind == "send_checkins":
         n = _email_subs(db, a["ids"], "Checking in on your Brightloop subscription",
                         lambda s: f"Hello {s.customer.name},\n\nWe noticed things have been quiet on {s.subscription_number}. "
-                                  "Is there anything we can help with? Reply and your account manager will get back to you today.\n\nBrightloop Software")
+                                  "Is there anything we can help with? Reply and your account manager will get back to you today.\n\nBrightloop Software", actor)
         summary = f"Sent {n} check-in email{'s' if n != 1 else ''}"
     elif kind == "send_annual_offers":
         n = _email_subs(db, a["ids"], "Save with annual billing on {sub.subscription_number}",
                         lambda s: f"Hello {s.customer.name},\n\nThanks for being with us. Switching {s.subscription_number} to annual billing "
                                   f"would cost {s.recurring_amount * 10:,.2f} a year instead of {s.recurring_amount * 12:,.2f}: two months free. "
-                                  "Reply to this email and we'll set it up.\n\nBrightloop Software")
+                                  "Reply to this email and we'll set it up.\n\nBrightloop Software", actor)
         summary = f"Sent {n} annual-plan offer{'s' if n != 1 else ''}"
     elif kind == "send_upsell_offers":
         product = db.get(Product, a["product_id"])
         n = _email_subs(db, a["ids"], f"{product.name} for your team",
                         lambda s: f"Hello {s.customer.name},\n\nTeams your size get a lot out of {product.name}. It's {product.sales_price:,.2f} "
-                                  f"a month on {s.subscription_number}. Reply to this email and we'll add it.\n\nBrightloop Software")
+                                  f"a month on {s.subscription_number}. Reply to this email and we'll add it.\n\nBrightloop Software", actor)
         summary = f"Sent {n} {product.name} offer{'s' if n != 1 else ''}"
     elif kind == "send_quote_followups":
         n = _email_subs(db, a["ids"], "Your Brightloop quotation {sub.subscription_number} expires soon",
                         lambda s: f"Hello {s.customer.name},\n\nYour quotation {s.subscription_number} for {s.plan.name} is valid until "
-                                  f"{s.quotation_valid_until}. You can accept it from your customer portal.\n\nBrightloop Software")
+                                  f"{s.quotation_valid_until}. You can accept it from your customer portal.\n\nBrightloop Software", actor)
         summary = f"Sent {n} quotation follow-up{'s' if n != 1 else ''}"
     else:
         raise HTTPException(400, f"Unknown action '{kind}'")

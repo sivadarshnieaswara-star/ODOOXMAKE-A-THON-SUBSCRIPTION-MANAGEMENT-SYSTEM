@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from ..models import Invoice, Payment, User
+from . import blackbox
 from .common import next_number
 
 
@@ -26,4 +27,13 @@ def record_payment(db: Session, inv: Invoice, amount: float, method: str, paymen
         inv.status = "paid"
         inv.paid_at = paid_on
     db.flush()
+    late = (paid_on - inv.due_date).days
+    blackbox.record(inv.subscription, "payment_received",
+                    f"Payment {pay.payment_number} of {amount:,.2f} by {method.replace('_', ' ')} for {inv.invoice_number}"
+                    + (f", {late} days late" if late > 0 else ""), actor=actor, on=paid_on, amount=amount,
+                    data={"invoice": inv.invoice_number, "payment": pay.payment_number, "method": method, "note": note,
+                          "balance_after": inv.balance_due, "days_late": max(late, 0)})
+    if inv.status == "paid":
+        blackbox.record(inv.subscription, "invoice_paid", f"Invoice {inv.invoice_number} settled in full", on=paid_on,
+                        data={"invoice": inv.invoice_number})
     return pay

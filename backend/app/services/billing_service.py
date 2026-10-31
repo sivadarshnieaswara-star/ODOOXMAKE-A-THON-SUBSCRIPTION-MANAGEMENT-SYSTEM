@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..models import PAYMENT_TERMS, DiscountRule, Invoice, InvoiceLine, Subscription, User
+from . import blackbox
 from .common import next_number, send_email
 from .discount_service import DraftLine, best_discount
 from .subscription_service import auto_close_expired, auto_resume_due, next_period_start
@@ -62,6 +63,13 @@ def build_invoice(db: Session, sub: Subscription, period_start: date, period_end
     if discount:
         discount.rule.current_uses += 1
     db.add(inv)
+    blackbox.record(sub, "invoice_issued", f"Invoice {inv.invoice_number} issued for {period_start} to {period_end}"
+                    + (f", {discount.rule.code} discount applied" if discount else ""), on=period_start, amount=total,
+                    data={"invoice": inv.invoice_number, "period": [period_start, period_end], "due": inv.due_date,
+                          "subtotal": subtotal, "discount": discount_amount, "discount_code": inv.discount_code,
+                          "tax": inv.tax_amount, "status": inv.status,
+                          "lines": [{"product": l.product_name, "qty": l.quantity, "unit_price": l.unit_price,
+                                     "tax_rate": l.tax_rate, "total": l.line_total} for l in lines]})
     return inv
 
 
@@ -136,6 +144,8 @@ def confirm_invoice(inv: Invoice) -> Invoice:
         raise HTTPException(400, f"Only draft invoices can be confirmed (this one is {inv.status})")
     inv.status = "confirmed"
     inv.balance_due = inv.total_amount
+    blackbox.record(inv.subscription, "invoice_confirmed", f"Invoice {inv.invoice_number} confirmed; {inv.balance_due:,.2f} due by {inv.due_date}",
+                    amount=inv.total_amount, data={"invoice": inv.invoice_number, "due": inv.due_date})
     return inv
 
 
@@ -146,6 +156,8 @@ def cancel_invoice(db: Session, inv: Invoice) -> Invoice:
         raise HTTPException(400, "Invoice has payments recorded against it and cannot be cancelled")
     inv.status = "cancelled"
     inv.balance_due = 0.0
+    blackbox.record(inv.subscription, "invoice_cancelled", f"Invoice {inv.invoice_number} cancelled", amount=inv.total_amount,
+                    data={"invoice": inv.invoice_number, "discount_returned": inv.discount_code})
     if inv.discount_rule_id:  # give the discount use back
         rule = db.get(DiscountRule, inv.discount_rule_id)
         if rule and rule.current_uses > 0:
@@ -166,4 +178,6 @@ def send_invoice(db: Session, inv: Invoice) -> Invoice:
             "You can view and pay it in your Brightloop customer portal.\n\nBrightloop Software")
     send_email(db, customer.email, f"Invoice {inv.invoice_number} from Brightloop Software", body)
     inv.sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    blackbox.record(inv.subscription, "invoice_sent", f"Invoice {inv.invoice_number} emailed to {customer.email}",
+                    data={"invoice": inv.invoice_number, "to": customer.email})
     return inv

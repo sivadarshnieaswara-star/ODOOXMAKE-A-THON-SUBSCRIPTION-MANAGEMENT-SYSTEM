@@ -12,6 +12,7 @@ from .routers import (
     subscription_router,
 )
 from .seed_data import bootstrap_admin, seed_demo
+from .services.blackbox import backfill_missing
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI):
         bootstrap_admin(db)
         if config.SEED_DEMO_DATA:
             seed_demo(db)
+        backfill_missing(db)   # subscriptions created before the black box existed get a reconstructed record
     yield
 
 

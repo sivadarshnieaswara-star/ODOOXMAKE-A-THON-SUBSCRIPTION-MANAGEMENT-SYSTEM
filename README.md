@@ -96,6 +96,18 @@ and most have a one-click action (emails, confirming drafts, running billing). T
 "autopilot", which carries out all the low-risk ones in order. Everything is logged in an activity
 feed, and recommendations can be snoozed for 30 days.
 
+**Subscription black box** - like a flight recorder, every subscription keeps an append-only log of
+every important billing event: created, quoted, confirmed, activated, terms changed, paused and
+resumed (with dates and reasons), renewed, closed, every invoice issued (with its tax and discount
+breakdown), confirmed, sent or cancelled, every payment (flagging late ones), invoices settled, and
+reminder or outreach emails. Each entry stores the SHA-256 hash of the entry before it, so changing or
+deleting anything in the past breaks the chain, and the system shows where. Any subscription can
+produce a printable "Flight recorder report" (save as PDF from the print dialog) with an integrity
+seal, lifetime figures, a billed-vs-collected chart, an incidents list and the full event log; JSON
+export is available too. Customers can download a copy for their own subscriptions (internal notes
+left out). Subscriptions that existed before the recorder get their history rebuilt from existing
+records on startup, marked as reconstructed.
+
 ## Folder structure
 
 ```

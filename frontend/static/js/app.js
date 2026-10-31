@@ -926,6 +926,55 @@ function renderForecast(d, ms) {
     </div>`;
 }
 
+// ---------- black box ----------
+const BB_STYLE = {
+  created: ['file-plus', 'brand'], quotation_sent: ['send', 'brand'], confirmed: ['check', 'brand'], activated: ['play', 'green'],
+  self_service: ['user-plus', 'green'], terms_changed: ['pencil', 'brand'], reverted_to_draft: ['undo-2', 'brand'],
+  paused: ['pause', 'amber'], resumed: ['play', 'green'], renewed: ['refresh-cw', 'green'], closed: ['square', 'red'],
+  cancelled: ['x', 'red'], declined: ['x', 'red'], invoice_issued: ['file-text', 'blue'], invoice_confirmed: ['file-check', 'blue'],
+  invoice_sent: ['mail', 'blue'], invoice_cancelled: ['file-x', 'red'], payment_received: ['banknote', 'green'],
+  invoice_paid: ['badge-check', 'green'], reminder_sent: ['bell', 'amber'], outreach_sent: ['mail', 'brand'],
+};
+async function openBlackboxReport(id) {
+  const html = await run(() => api(`/subscriptions/${id}/blackbox/report`, { raw: true }));
+  const w = window.open('', '_blank');
+  if (!w) return toast('Allow pop-ups to open the report', 'error');
+  w.document.open(); w.document.write(html); w.document.close();
+}
+async function exportBlackbox(id, number) {
+  const data = await run(() => api(`/subscriptions/${id}/blackbox`));
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: `${number}-blackbox.json` });
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+async function loadBlackbox(sub) {
+  const card = $('#bb-card');
+  let d;
+  try { d = await api(`/subscriptions/${sub.id}/blackbox`); } catch (e) { if (card) card.innerHTML = `<p class="p-4 text-sm text-red-700">${esc(e.message)}</p>`; return; }
+  if (!$('#bb-card')) return;
+  const v = d.verification;
+  const recent = d.entries.slice().reverse();
+  const show = 12;
+  $('#bb-card').innerHTML = `
+    <div class="card-head"><div class="t">${icon('box')} Black box</div>
+      <span class="badge ${v.ok ? 'b-green' : 'b-red'} ml-auto">${icon(v.ok ? 'shield-check' : 'shield-alert', 'h-3.5 w-3.5')} ${v.ok ? `Verified · ${v.entries}` : `Broken at #${v.broken_at}`}</span></div>
+    ${v.ok ? '' : `<div class="border-b border-slate-100 bg-rose-50 px-4 py-2 text-xs text-rose-700">${esc(v.reason)}. Entries after #${v.broken_at} can't be trusted.</div>`}
+    <ol class="divide-y divide-slate-100 text-sm">${recent.slice(0, show).map(e => {
+      const [ic, tone] = BB_STYLE[e.event_type] || ['circle', 'brand'];
+      return `<li class="flex gap-3 px-4 py-2.5"><span class="stat-icon tone-${tone} !mb-0 !p-1.5 h-fit">${icon(ic, '!h-3.5 !w-3.5')}</span>
+        <div class="min-w-0 flex-1"><div class="flex justify-between gap-2"><span class="font-medium">${esc(e.summary)}</span>
+          ${e.amount != null ? `<span class="tabular-nums text-slate-600">${money(e.amount)}</span>` : ''}</div>
+        <div class="text-xs text-slate-500">#${e.seq} · ${fmtDate(e.occurred_on)} · ${esc(e.actor_email)}${e.internal ? ' · internal' : ''}${e.data.reconstructed ? ' · reconstructed' : ''}
+          <span class="font-mono" title="${e.hash}">· ${e.hash.slice(0, 8)}</span></div></div></li>`;
+    }).join('') || '<li class="px-4 py-6 text-center text-slate-400">Nothing recorded yet.</li>'}</ol>
+    ${recent.length > show ? `<div class="px-4 py-2 text-xs text-slate-500">+ ${recent.length - show} earlier events in the full report</div>` : ''}
+    <div class="flex flex-wrap gap-2 border-t border-slate-100 bg-slate-50 px-4 py-3">
+      <button class="btn btn-primary btn-sm" id="bb-report">${icon('file-text')} Flight recorder report</button>
+      <button class="btn btn-light btn-sm" id="bb-json">${icon('download')} Export JSON</button></div>`;
+  $('#bb-report').addEventListener('click', () => openBlackboxReport(sub.id));
+  $('#bb-json').addEventListener('click', () => exportBlackbox(sub.id, sub.subscription_number));
+}
+
 // ---------- recommendations ----------
 const REC_CATEGORY = { Collections: ['hand-coins', 'red'], Operations: ['settings-2', 'blue'], Renewals: ['refresh-cw', 'amber'],
   Retention: ['life-buoy', 'red'], Growth: ['rocket', 'green'], Sales: ['handshake', 'brand'], Pricing: ['tag', 'brand'] };
@@ -1069,7 +1118,7 @@ async function viewSubscriptions(main) {
   const [data, customers] = await Promise.all([api('/subscriptions?' + qs({ ...f, limit: PAGE })), getCustomers()]);
   const cust = customers.find(c => String(c.id) === String(f.customer_id));
   main.innerHTML = pageHeader('Subscriptions', 'Every contract and where it stands: Draft → Quotation → Confirmed → Active → Closed',
-    `<button class="btn btn-light" id="from-tpl">From template</button><button class="btn btn-primary" id="new-sub">+ New subscription</button>`) + `
+    `<button class="btn btn-light" id="verify-bb">${icon('shield-check')} Verify black boxes</button><button class="btn btn-light" id="from-tpl">From template</button><button class="btn btn-primary" id="new-sub">+ New subscription</button>`) + `
     <div class="card">
       <div class="flex flex-wrap items-center gap-2 px-3 pt-2 border-b">
         ${['', ...SUB_STATES].map(s => `<a class="tab ${f.status === s ? 'active' : ''}" data-st="${s}">${s ? label(s) : 'All'}</a>`).join('')}
@@ -1088,6 +1137,11 @@ async function viewSubscriptions(main) {
   $$('[data-id]', main).forEach(tr => tr.addEventListener('click', () => { location.hash = '#/subscriptions/' + tr.dataset.id; }));
   $('#new-sub').addEventListener('click', () => subscriptionForm());
   $('#from-tpl').addEventListener('click', () => useTemplateDialog());
+  $('#verify-bb').addEventListener('click', async () => {
+    const r = await run(() => api('/blackbox/verify'));
+    if (r.broken.length) toast(`${r.broken.length} recorder${r.broken.length === 1 ? '' : 's'} failed: ${r.broken.map(b => b.subscription_number).join(', ')}`, 'error');
+    else toast(`All ${r.subscriptions} black boxes verified · ${r.entries.toLocaleString()} events intact`);
+  });
 }
 
 async function subscriptionForm(sub) {
@@ -1183,10 +1237,9 @@ async function viewSubscriptionDetail(main, id) {
           ['Last invoiced period', fmtDate(sub.last_billing_date)], ['Next invoice', fmtDate(sub.next_billing_date)],
         ].map(([k, v]) => `<div class="flex justify-between gap-4"><span class="text-gray-500">${k}</span><span class="text-right">${v}</span></div>`).join('')}
         ${sub.notes ? `<div class="pt-2 border-t text-gray-600">${esc(sub.notes)}</div>` : ''}</div>
-        <div class="card p-4"><h3 class="font-semibold mb-3">History</h3><ol class="space-y-3 text-sm">
-          ${sub.events.slice().reverse().map(e => `<li class="flex gap-3"><span class="mt-1.5 w-2 h-2 rounded-full bg-brand-600 shrink-0"></span>
-            <div><div><b class="capitalize">${label(e.action)}</b> → ${badge(e.to_status)}</div>
-            <div class="text-xs text-gray-500">${new Date(e.created_at + 'Z').toLocaleString()} · ${esc(e.actor_email)}</div></div></li>`).join('')}</ol></div></div></div>`;
+        <div class="card overflow-hidden" id="bb-card"><div class="card-head"><div class="t">${icon('box')} Black box</div></div>
+          <div class="flex justify-center py-8"><div class="spinner"></div></div></div></div></div>`;
+  loadBlackbox(sub);
   $$('[data-act]', main).forEach(b => b.addEventListener('click', () => doSubAction(sub, b.dataset.act)));
   $$('[data-inv]', main).forEach(tr => tr.addEventListener('click', () => showInvoice(tr.dataset.inv)));
   $('#edit-sub')?.addEventListener('click', () => subscriptionForm(sub));
@@ -1563,11 +1616,13 @@ async function viewMySubscriptions(main) {
         <div><div class="label">${s.status === 'quotation' ? 'Quote valid until' : s.status === 'paused' ? 'Resumes' : 'Next invoice'}</div>${s.status === 'paused' ? (s.resume_on ? fmtDate(s.resume_on) : 'when you resume') : fmtDate(s.status === 'quotation' ? s.quotation_valid_until : s.next_billing_date)}</div></div>
       ${s.status === 'paused' ? `<div class="mt-3">${pauseBanner(s)}</div>` : ''}
       <div class="lines text-sm mt-3 text-gray-600"></div>
-      <div class="flex flex-wrap gap-2 mt-4">${subActions(s)}</div></div>`).join('')
+      <div class="flex flex-wrap gap-2 mt-4">${subActions(s)}
+        <button class="btn btn-ghost" data-bb="${s.id}">${icon('box')} Billing record</button></div></div>`).join('')
       || '<div class="card p-10 text-center text-gray-400 lg:col-span-2">You have no subscriptions yet. <a class="text-odoo" href="#/subscribe">Browse plans →</a></div>'}</div>`;
   for (const s of data.items) {
     const card = $(`[data-sid="${s.id}"]`, main);
     $$('[data-act]', card).forEach(b => b.addEventListener('click', () => doSubAction(s, b.dataset.act)));
+    $$('[data-bb]', card).forEach(b => b.addEventListener('click', () => openBlackboxReport(s.id)));
     api('/subscriptions/' + s.id).then(d => {
       $('.lines', card).innerHTML = d.lines.map(l => `<div class="flex justify-between"><span>${l.quantity} × ${esc(l.product_name)}${l.variant_label ? ` (${esc(l.variant_label)})` : ''}</span><span>${money(l.amount)}</span></div>`).join('');
     });

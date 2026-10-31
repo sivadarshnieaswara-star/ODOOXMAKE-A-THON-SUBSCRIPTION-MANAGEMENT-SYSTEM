@@ -299,6 +299,26 @@ class Payment(Base):
     customer: Mapped[User] = relationship()
 
 
+class BlackBoxEntry(Base):
+    """Append-only, hash-chained record of every important billing event on one subscription.
+    hash = sha256(prev_hash + this entry's fields), so editing any past entry breaks the chain."""
+    __tablename__ = "blackbox_entries"
+    __table_args__ = (UniqueConstraint("subscription_id", "seq", name="uq_blackbox_seq"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subscription_id: Mapped[int] = mapped_column(ForeignKey("subscriptions.id"), index=True)
+    seq: Mapped[int] = mapped_column(Integer)
+    occurred_on: Mapped[date] = mapped_column(Date)          # business date of the event
+    recorded_at: Mapped[datetime] = mapped_column(DateTime)  # wall-clock time it was written
+    event_type: Mapped[str] = mapped_column(String(40))
+    actor_email: Mapped[str] = mapped_column(String(255))
+    summary: Mapped[str] = mapped_column(String(500))
+    amount: Mapped[float | None] = mapped_column(Float)
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    internal: Mapped[bool] = mapped_column(Boolean, default=False)  # hidden from the customer copy
+    prev_hash: Mapped[str] = mapped_column(String(64))
+    hash: Mapped[str] = mapped_column(String(64))
+
+
 class AutomationLog(Base):
     """What the recommendations engine (or someone acting on it) did, for the activity feed."""
     __tablename__ = "automation_log"

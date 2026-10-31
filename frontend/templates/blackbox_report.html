@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Black box · {{ sub.subscription_number }}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #e9e7ea; color: #17181a; font: 13px/1.5 Inter, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .page { max-width: 900px; margin: 24px auto; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,.12); }
+  .head { background: linear-gradient(135deg, #2a1826, #17121a); color: #fff; padding: 28px 36px; position: relative; overflow: hidden; }
+  .head:after { content: ""; position: absolute; right: -40px; top: -40px; width: 220px; height: 220px; border-radius: 50%;
+    border: 18px solid rgba(255,140,0,.18); }
+  .stripe { height: 8px; background: repeating-linear-gradient(-45deg, #f59e0b 0 14px, #17121a 14px 28px); }
+  .kicker { font-size: 11px; letter-spacing: .28em; text-transform: uppercase; color: #f6c56b; font-weight: 700; }
+  h1 { margin: 6px 0 2px; font-size: 26px; letter-spacing: -.01em; }
+  .sub { color: rgba(255,255,255,.7); }
+  .meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; position: relative; z-index: 1; }
+  .meta div { background: rgba(255,255,255,.07); border-radius: 8px; padding: 8px 10px; }
+  .meta b { display: block; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.55); font-weight: 600; }
+  section { padding: 22px 36px; border-bottom: 1px solid #eee; }
+  h2 { margin: 0 0 12px; font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: #714B67; }
+  .seal { display: flex; gap: 16px; align-items: center; padding: 14px 16px; border-radius: 10px; }
+  .seal.ok { background: #ecfdf5; border: 1px solid #a7f3d0; }
+  .seal.bad { background: #fff1f2; border: 1px solid #fecdd3; }
+  .seal .icon { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; font-weight: 700; color: #fff; flex-shrink: 0; }
+  .ok .icon { background: #059669; } .bad .icon { background: #e11d48; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; word-break: break-all; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .stat { border: 1px solid #eee; border-radius: 8px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 11px; color: #6b6f76; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #6b6f76; padding: 6px 8px; border-bottom: 2px solid #17181a; }
+  td { padding: 7px 8px; border-bottom: 1px solid #f0eeee; vertical-align: top; }
+  .r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+  .t-money { background: #ecfdf5; color: #047857; } .t-bill { background: #f0f9ff; color: #0369a1; }
+  .t-life { background: #f6eef3; color: #714B67; } .t-warn { background: #fffbeb; color: #b45309; } .t-int { background: #f3f2f0; color: #55595f; }
+  .inc { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px dashed #eee; }
+  .inc .lv { width: 8px; border-radius: 4px; flex-shrink: 0; }
+  .critical .lv { background: #e11d48; } .warning .lv { background: #f59e0b; } .info .lv { background: #a3a6ac; }
+  .muted { color: #6b6f76; }
+  .bar { max-width: 900px; margin: 16px auto 0; display: flex; justify-content: flex-end; gap: 8px; }
+  .bar button { background: #714B67; color: #fff; border: 0; padding: 8px 16px; border-radius: 6px; cursor: pointer; font: 600 13px Inter, sans-serif; }
+  @media print { body { background: #fff; } .page { box-shadow: none; margin: 0; max-width: none; } .bar { display: none; }
+    section { break-inside: avoid-page; } tr { break-inside: avoid; } .head, .stripe, .tag, .seal, .icon { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+{% set v = verification %}{% set s = stats %}
+<div class="bar"><button onclick="window.print()">Print / Save as PDF</button></div>
+<div class="page">
+  <div class="stripe"></div>
+  <div class="head">
+    <div class="kicker">Subscription black box · Flight recorder report{% if customer_copy %} · Customer copy{% endif %}</div>
+    <h1>{{ sub.subscription_number }} · {{ customer.company_name or customer.name }}</h1>
+    <div class="sub">{{ plan.name }} · billed {{ plan.billing_frequency }} · status {{ sub.status }}</div>
+    <div class="meta">
+      <div><b>Report ID</b><span class="mono">{{ report_id or "—" }}</span></div>
+      <div><b>Generated</b>{{ generated_at.strftime('%d %b %Y %H:%M') }} UTC</div>
+      <div><b>On the books</b>{{ sub.start_date.strftime('%d %b %Y') }} → {{ (sub.closed_at.strftime('%d %b %Y')) if sub.closed_at else 'today' }}</div>
+      <div><b>Events recorded</b>{{ s.events }}</div>
+    </div>
+  </div>
+  <div class="stripe"></div>
+
+  <section>
+    <h2>Integrity seal</h2>
+    {% if v.ok %}
+    <div class="seal ok"><div class="icon">✓</div><div>
+      <b>Chain verified: {{ v.entries }} of {{ v.entries }} entries intact.</b>
+      <div class="muted">Each entry carries the SHA-256 hash of the one before it. Any change to a past entry would break every hash after it.</div>
+      <div class="mono" style="margin-top:6px">Head hash {{ v.head }}</div></div></div>
+    {% else %}
+    <div class="seal bad"><div class="icon">!</div><div>
+      <b>Chain broken at entry {{ v.broken_at }}: {{ v.reason }}.</b>
+      <div class="muted">The record after this point can't be trusted. Entries before it are still verified.</div></div></div>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Flight summary</h2>
+    <div class="grid">
+      <div class="stat"><b>{{ "{:,.2f}".format(s.billed) }}</b><span>billed over {{ s.invoices }} invoice{{ '' if s.invoices == 1 else 's' }}</span></div>
+      <div class="stat"><b>{{ "{:,.2f}".format(s.collected) }}</b><span>collected in {{ s.payments }} payment{{ '' if s.payments == 1 else 's' }}</span></div>
+      <div class="stat"><b>{{ "{:,.2f}".format(s.outstanding) }}</b><span>still outstanding</span></div>
+      <div class="stat"><b>{{ ("%d%%" % (s.collection_rate * 100)) if s.collection_rate is not none else "—" }}</b><span>collection rate</span></div>
+      <div class="stat"><b>{{ "{:,.2f}".format(s.discounts) }}</b><span>discounts given</span></div>
+      <div class="stat"><b>{{ "{:,.2f}".format(s.tax) }}</b><span>tax charged</span></div>
+      <div class="stat"><b>{{ ("%d%%" % (s.on_time_rate * 100)) if s.on_time_rate is not none else "—" }}</b><span>invoices paid on time · {{ s.late_payments }} late payment{{ '' if s.late_payments == 1 else 's' }}</span></div>
+      <div class="stat"><b>{{ s.days_on_book }} days</b><span>on the books · {{ s.pauses }} pause{{ '' if s.pauses == 1 else 's' }} ({{ s.days_paused }} days) · {{ s.renewals }} renewal{{ '' if s.renewals == 1 else 's' }}</span></div>
+    </div>
+  </section>
+
+  {% if chart %}
+  <section>
+    <h2>Flight data · cumulative billed vs collected</h2>
+    <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" style="width:100%;height:auto">
+      {% for g in chart.grid %}<line x1="{{ chart.left }}" x2="{{ chart.w - 10 }}" y1="{{ g.y }}" y2="{{ g.y }}" stroke="#eee"/>
+      <text x="{{ chart.left - 6 }}" y="{{ g.y + 3 }}" font-size="9" text-anchor="end" fill="#a3a6ac">{{ g.label }}</text>{% endfor %}
+      <path d="{{ chart.billed }}" fill="none" stroke="#a3a6ac" stroke-width="2"/>
+      <path d="{{ chart.collected }}" fill="none" stroke="#714B67" stroke-width="2.4"/>
+      <text x="{{ chart.left }}" y="{{ chart.h - 6 }}" font-size="10" fill="#6b6f76">{{ chart.start.strftime('%d %b %Y') }}</text>
+      <text x="{{ chart.w - 10 }}" y="{{ chart.h - 6 }}" font-size="10" text-anchor="end" fill="#6b6f76">{{ chart.end.strftime('%d %b %Y') }}</text>
+    </svg>
+    <div class="muted"><span style="color:#a3a6ac">━</span> billed &nbsp; <span style="color:#714B67">━</span> collected. The gap between the lines is money owed at that point.</div>
+  </section>
+  {% endif %}
+
+  <section>
+    <h2>Incidents</h2>
+    {% for i in incidents %}
+      <div class="inc {{ i.level }}"><div class="lv"></div><div><b>{{ i.title }}</b> <span class="muted">· {{ i.on.strftime('%d %b %Y') }}</span><div class="muted">{{ i.detail }}</div></div></div>
+    {% else %}
+      <div class="muted">No incidents: nothing overdue, no late payments, no pauses or cancellations.</div>
+    {% endfor %}
+  </section>
+
+  <section>
+    <h2>Event log</h2>
+    <table>
+      <thead><tr><th>#</th><th>Date</th><th>Event</th><th>Detail</th><th class="r">Amount</th><th>Hash</th></tr></thead>
+      <tbody>
+      {% for e in entries %}
+        {% set t = e.event_type %}
+        <tr>
+          <td class="muted">{{ e.seq }}</td>
+          <td style="white-space:nowrap">{{ e.occurred_on.strftime('%d %b %Y') }}</td>
+          <td><span class="tag {{ 't-money' if t in ('payment_received','invoice_paid') else 't-bill' if t.startswith('invoice') else 't-warn' if t in ('paused','closed','cancelled','declined') else 't-int' if e.internal else 't-life' }}">{{ t.replace('_', ' ') }}</span></td>
+          <td>{{ e.summary }}<div class="muted" style="font-size:11px">{{ e.actor_email }}{% if e.data.reconstructed %} · reconstructed from records{% endif %}</div></td>
+          <td class="r">{{ "{:,.2f}".format(e.amount) if e.amount is not none else "" }}</td>
+          <td class="mono muted" title="{{ e.hash }}">{{ e.hash[:10] }}…</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if customer_copy %}<p class="muted" style="margin-top:10px">Customer copy: internal notes (such as reminder emails) are left out; the integrity seal covers the full record.</p>{% endif %}
+  </section>
+
+  <section style="border-bottom:0" class="muted">
+    To verify: start from SHA-256("brightloop-blackbox:{{ sub.subscription_number }}"); each entry's hash is SHA-256 of its fields plus the previous hash.
+    Brightloop Software · Subscription Management System.
+  </section>
+</div>
+</body>
+</html>
